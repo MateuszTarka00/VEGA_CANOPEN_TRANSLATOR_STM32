@@ -48,10 +48,10 @@
 /* USER CODE BEGIN Variables */
 
 /* USER CODE END Variables */
-/* Definitions for tpdoRequesterT */
-osThreadId_t tpdoRequesterTHandle;
-const osThreadAttr_t tpdoRequesterT_attributes = {
-  .name = "tpdoRequesterT",
+/* Definitions for CanOpenRxT */
+osThreadId_t CanOpenRxTHandle;
+const osThreadAttr_t CanOpenRxT_attributes = {
+  .name = "CanOpenRxT",
   .priority = (osPriority_t) osPriorityNormal,
   .stack_size = 512 * 4
 };
@@ -59,14 +59,21 @@ const osThreadAttr_t tpdoRequesterT_attributes = {
 osThreadId_t CanOpenMenagerTHandle;
 const osThreadAttr_t CanOpenMenagerT_attributes = {
   .name = "CanOpenMenagerT",
-  .priority = (osPriority_t) osPriorityNormal3,
+  .priority = (osPriority_t) osPriorityNormal4,
   .stack_size = 1024 * 4
 };
-/* Definitions for InputCheckT */
-osThreadId_t InputCheckTHandle;
-const osThreadAttr_t InputCheckT_attributes = {
-  .name = "InputCheckT",
+/* Definitions for VegaRxT */
+osThreadId_t VegaRxTHandle;
+const osThreadAttr_t VegaRxT_attributes = {
+  .name = "VegaRxT",
   .priority = (osPriority_t) osPriorityNormal2,
+  .stack_size = 512 * 4
+};
+/* Definitions for TrancieverT */
+osThreadId_t TrancieverTHandle;
+const osThreadAttr_t TrancieverT_attributes = {
+  .name = "TrancieverT",
+  .priority = (osPriority_t) osPriorityLow,
   .stack_size = 512 * 4
 };
 
@@ -75,9 +82,10 @@ const osThreadAttr_t InputCheckT_attributes = {
 
 /* USER CODE END FunctionPrototypes */
 
-void tpdoRequester(void *argument);
+void canOpenRx(void *argument);
 void CanOpenMenager(void *argument);
-void InputCheck(void *argument);
+void vegaRx(void *argument);
+void tarnciever(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -172,14 +180,17 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of tpdoRequesterT */
-  tpdoRequesterTHandle = osThreadNew(tpdoRequester, NULL, &tpdoRequesterT_attributes);
+  /* creation of CanOpenRxT */
+  CanOpenRxTHandle = osThreadNew(canOpenRx, NULL, &CanOpenRxT_attributes);
 
   /* creation of CanOpenMenagerT */
   CanOpenMenagerTHandle = osThreadNew(CanOpenMenager, NULL, &CanOpenMenagerT_attributes);
 
-  /* creation of InputCheckT */
-  InputCheckTHandle = osThreadNew(InputCheck, NULL, &InputCheckT_attributes);
+  /* creation of VegaRxT */
+  VegaRxTHandle = osThreadNew(vegaRx, NULL, &VegaRxT_attributes);
+
+  /* creation of TrancieverT */
+  TrancieverTHandle = osThreadNew(tarnciever, NULL, &TrancieverT_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -191,22 +202,22 @@ void MX_FREERTOS_Init(void) {
 
 }
 
-/* USER CODE BEGIN Header_tpdoRequester */
+/* USER CODE BEGIN Header_canOpenRx */
 /**
-  * @brief  Function implementing the tpdoRequesterT thread.
+  * @brief  Function implementing the CanOpenRxT thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_tpdoRequester */
-void tpdoRequester(void *argument)
+/* USER CODE END Header_canOpenRx */
+void canOpenRx(void *argument)
 {
-  /* USER CODE BEGIN tpdoRequester */
+  /* USER CODE BEGIN canOpenRx */
   /* Infinite loop */
   for(;;)
   {
     osDelay(1);
   }
-  /* USER CODE END tpdoRequester */
+  /* USER CODE END canOpenRx */
 }
 
 /* USER CODE BEGIN Header_CanOpenMenager */
@@ -227,22 +238,40 @@ void CanOpenMenager(void *argument)
   /* USER CODE END CanOpenMenager */
 }
 
-/* USER CODE BEGIN Header_InputCheck */
+/* USER CODE BEGIN Header_vegaRx */
 /**
-* @brief Function implementing the InputCheckT thread.
+* @brief Function implementing the VegaRxT thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_InputCheck */
-void InputCheck(void *argument)
+/* USER CODE END Header_vegaRx */
+void vegaRx(void *argument)
 {
-  /* USER CODE BEGIN InputCheck */
+  /* USER CODE BEGIN vegaRx */
   /* Infinite loop */
   for(;;)
   {
     osDelay(1);
   }
-  /* USER CODE END InputCheck */
+  /* USER CODE END vegaRx */
+}
+
+/* USER CODE BEGIN Header_tarnciever */
+/**
+* @brief Function implementing the TrancieverT thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_tarnciever */
+void tarnciever(void *argument)
+{
+  /* USER CODE BEGIN tarnciever */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END tarnciever */
 }
 
 /* Private application code --------------------------------------------------*/
