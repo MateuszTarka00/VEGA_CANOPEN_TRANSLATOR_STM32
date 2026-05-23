@@ -33,6 +33,7 @@
 #include "OD.h"
 #include "softwareTimer_ms.h"
 #include "iwdg.h"
+#include "canOpenManager.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -79,6 +80,13 @@ const osThreadAttr_t VegaRxT_attributes = {
   .priority = (osPriority_t) osPriorityNormal2,
   .stack_size = 512 * 4
 };
+/* Definitions for CanOpenRxT */
+osThreadId_t CanOpenRxTHandle;
+const osThreadAttr_t CanOpenRxT_attributes = {
+  .name = "CanOpenRxT",
+  .priority = (osPriority_t) osPriorityNormal1,
+  .stack_size = 512 * 4
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -88,6 +96,7 @@ const osThreadAttr_t VegaRxT_attributes = {
 void tranciever(void *argument);
 void canOpenMenager(void *argument);
 void vegaRx(void *argument);
+void canOpenRx(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -179,6 +188,7 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+	CANOPEN_InitRTOS();
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -190,6 +200,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of VegaRxT */
   VegaRxTHandle = osThreadNew(vegaRx, NULL, &VegaRxT_attributes);
+
+  /* creation of CanOpenRxT */
+  CanOpenRxTHandle = osThreadNew(canOpenRx, NULL, &CanOpenRxT_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -291,6 +304,29 @@ void vegaRx(void *argument)
     osDelay(1);
   }
   /* USER CODE END vegaRx */
+}
+
+/* USER CODE BEGIN Header_canOpenRx */
+/**
+* @brief Function implementing the CanOpenRxT thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_canOpenRx */
+void canOpenRx(void *argument)
+{
+  /* USER CODE BEGIN canOpenRx */
+  /* Infinite loop */
+  for(;;)
+  {
+	CAN_Message_t msg;
+	if(xQueueReceive(canOpenRxQueue, &msg, portMAX_DELAY) == pdTRUE)
+	{
+//		HAL_IWDG_Refresh(&hiwdg);
+		processCanOpenMessage(&msg);
+	}
+  }
+  /* USER CODE END canOpenRx */
 }
 
 /* Private application code --------------------------------------------------*/

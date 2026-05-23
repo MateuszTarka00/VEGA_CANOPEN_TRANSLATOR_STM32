@@ -64,6 +64,12 @@ void Error_Handler(void);
 #define CAN_OK_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
 extern osThreadId_t CanOpenMenagerTHandle;
+
+typedef enum
+{
+	FALSE,
+	TRUE
+}bool;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

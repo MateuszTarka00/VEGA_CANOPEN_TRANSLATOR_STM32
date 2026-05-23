@@ -32,6 +32,7 @@
 #include "CO_app_STM32.h"
 #include "FreeRTOS.h"
 #include "main.h"
+#include "canOpenManager.h"
 
 /* Local CAN module object */
 static CO_CANmodule_t* CANModule_local = NULL; /* Local instance of global CAN module */
@@ -509,6 +510,7 @@ prv_read_can_received_msg(CAN_HandleTypeDef* hcan, uint32_t fifo, uint32_t fifo_
 		if (HAL_FDCAN_GetRxMessage(hfdcan, fifo, &rx_hdr, rcvMsg.data) != HAL_OK) {
 			return;
 		}
+
 		if(rx_hdr.IdType !=	FDCAN_STANDARD_ID)
 			return;
 		/* Setup identifier (with RTR) and length */
@@ -546,6 +548,22 @@ prv_read_can_received_msg(CAN_HandleTypeDef* hcan, uint32_t fifo, uint32_t fifo_
 				break; /* Invalid length when more than 8 */
 		}
 		rcvMsgIdent = rcvMsg.ident;
+
+        CAN_Message_t msg;
+        BaseType_t hpw = pdFALSE;
+
+        msg.id = rx_hdr.Identifier;
+        msg.len = rcvMsg.dlc;
+        memcpy(msg.data, rcvMsg.data, sizeof(rcvMsg.data));
+
+		xQueueSendFromISR(
+			canOpenRxQueue,
+			&msg,
+			hpw
+		);
+
+        portYIELD_FROM_ISR(hpw);
+
 	#else
 		static CAN_RxHeaderTypeDef rx_hdr;
 		/* Read received message from FIFO */
@@ -603,6 +621,7 @@ void
 
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
+
 }
 
 /**
