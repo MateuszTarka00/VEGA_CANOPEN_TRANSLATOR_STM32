@@ -26,7 +26,13 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "CO_app_STM32.h"
+#include "tim.h"
+#include "fdcan.h"
+#include "NMT_functions.h"
+#include "OD.h"
+#include "softwareTimer_ms.h"
+#include "iwdg.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,7 +42,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define CANOPEN_TASK_DELAY_MS 			1
 
+#define CANOPEN_ID						1
+#define COB_ID							0x480 + CANOPEN_ID
+#define TPDO_INDEX						0x1800
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,11 +58,11 @@
 /* USER CODE BEGIN Variables */
 
 /* USER CODE END Variables */
-/* Definitions for CanOpenRxT */
-osThreadId_t CanOpenRxTHandle;
-const osThreadAttr_t CanOpenRxT_attributes = {
-  .name = "CanOpenRxT",
-  .priority = (osPriority_t) osPriorityNormal,
+/* Definitions for TrancieverT */
+osThreadId_t TrancieverTHandle;
+const osThreadAttr_t TrancieverT_attributes = {
+  .name = "TrancieverT",
+  .priority = (osPriority_t) osPriorityNormal3,
   .stack_size = 512 * 4
 };
 /* Definitions for CanOpenMenagerT */
@@ -69,23 +79,15 @@ const osThreadAttr_t VegaRxT_attributes = {
   .priority = (osPriority_t) osPriorityNormal2,
   .stack_size = 512 * 4
 };
-/* Definitions for TrancieverT */
-osThreadId_t TrancieverTHandle;
-const osThreadAttr_t TrancieverT_attributes = {
-  .name = "TrancieverT",
-  .priority = (osPriority_t) osPriorityLow,
-  .stack_size = 512 * 4
-};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 
 /* USER CODE END FunctionPrototypes */
 
-void canOpenRx(void *argument);
-void CanOpenMenager(void *argument);
+void tranciever(void *argument);
+void canOpenMenager(void *argument);
 void vegaRx(void *argument);
-void tarnciever(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -180,17 +182,14 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of CanOpenRxT */
-  CanOpenRxTHandle = osThreadNew(canOpenRx, NULL, &CanOpenRxT_attributes);
+  /* creation of TrancieverT */
+  TrancieverTHandle = osThreadNew(tranciever, NULL, &TrancieverT_attributes);
 
   /* creation of CanOpenMenagerT */
-  CanOpenMenagerTHandle = osThreadNew(CanOpenMenager, NULL, &CanOpenMenagerT_attributes);
+  CanOpenMenagerTHandle = osThreadNew(canOpenMenager, NULL, &CanOpenMenagerT_attributes);
 
   /* creation of VegaRxT */
   VegaRxTHandle = osThreadNew(vegaRx, NULL, &VegaRxT_attributes);
-
-  /* creation of TrancieverT */
-  TrancieverTHandle = osThreadNew(tarnciever, NULL, &TrancieverT_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -202,40 +201,78 @@ void MX_FREERTOS_Init(void) {
 
 }
 
-/* USER CODE BEGIN Header_canOpenRx */
+/* USER CODE BEGIN Header_tranciever */
 /**
-  * @brief  Function implementing the CanOpenRxT thread.
+  * @brief  Function implementing the TrancieverT thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_canOpenRx */
-void canOpenRx(void *argument)
+/* USER CODE END Header_tranciever */
+void tranciever(void *argument)
 {
-  /* USER CODE BEGIN canOpenRx */
+  /* USER CODE BEGIN tranciever */
   /* Infinite loop */
   for(;;)
   {
     osDelay(1);
   }
-  /* USER CODE END canOpenRx */
+  /* USER CODE END tranciever */
 }
 
-/* USER CODE BEGIN Header_CanOpenMenager */
+/* USER CODE BEGIN Header_canOpenMenager */
 /**
 * @brief Function implementing the CanOpenMenagerT thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_CanOpenMenager */
-void CanOpenMenager(void *argument)
+/* USER CODE END Header_canOpenMenager */
+void canOpenMenager(void *argument)
 {
-  /* USER CODE BEGIN CanOpenMenager */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END CanOpenMenager */
+  /* USER CODE BEGIN canOpenMenager */
+
+	  canOpenNodeSTM32.CANHandle = &hfdcan1;
+	  canOpenNodeSTM32.HWInitFunction = MX_FDCAN1_Init;
+	  canOpenNodeSTM32.timerHandle = &htim14;
+	  canOpenNodeSTM32.desiredNodeID = CANOPEN_ID;
+	  canOpenNodeSTM32.baudrate = 250;
+
+	  uint32_t correctTpdo1CobId = COB_ID;
+
+	  //Set COB-ID for TPDO
+	  OD_entry_t *tpdoCommEntry = OD_find(OD, TPDO_INDEX);
+	  if (tpdoCommEntry != NULL) {
+	      OD_IO_t io;
+
+	      // Get subindex 1 — COB-ID
+	      if (OD_getSub(tpdoCommEntry, 1, &io, 0) == ODR_OK) {
+	          uint32_t *cobIdPtr = (uint32_t *)io.stream.dataOrig;
+
+	          // Disable PDO temporarily (set bit 31)
+	          *cobIdPtr |= 0x80000000;
+
+	          // Update COB-ID
+	          *cobIdPtr = correctTpdo1CobId;
+
+	          // Re-enable PDO (clear bit 31)
+	          *cobIdPtr &= ~0x80000000;
+	      }
+	  }
+
+	  canopen_app_init(&canOpenNodeSTM32);
+	  CO_NMT_initCallbackChanged(canOpenNodeSTM32.canOpenStack->NMT, nmtStateChangedCallback);
+	  /* Infinite loop */
+	  for(;;)
+	  {
+//	    HAL_IWDG_Refresh(&hiwdg);
+		HAL_GPIO_WritePin(CAN_OK_GPIO_Port, CAN_OK_Pin , canOpenNodeSTM32.outStatusLEDGreen);
+		HAL_GPIO_WritePin(CAN_FAULT_GPIO_Port, CAN_FAULT_Pin, canOpenNodeSTM32.outStatusLEDRed);
+
+		canopen_app_interrupt();
+		canopen_app_process();
+
+		ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CANOPEN_TASK_DELAY_MS));
+	  }
+  /* USER CODE END canOpenMenager */
 }
 
 /* USER CODE BEGIN Header_vegaRx */
@@ -254,24 +291,6 @@ void vegaRx(void *argument)
     osDelay(1);
   }
   /* USER CODE END vegaRx */
-}
-
-/* USER CODE BEGIN Header_tarnciever */
-/**
-* @brief Function implementing the TrancieverT thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_tarnciever */
-void tarnciever(void *argument)
-{
-  /* USER CODE BEGIN tarnciever */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END tarnciever */
 }
 
 /* Private application code --------------------------------------------------*/

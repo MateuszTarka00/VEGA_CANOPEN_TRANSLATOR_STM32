@@ -32,7 +32,7 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "cmsis_os.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -63,7 +63,7 @@ void Error_Handler(void);
 #define CAN_OK_Pin GPIO_PIN_3
 #define CAN_OK_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
-
+extern osThreadId_t CanOpenMenagerTHandle;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

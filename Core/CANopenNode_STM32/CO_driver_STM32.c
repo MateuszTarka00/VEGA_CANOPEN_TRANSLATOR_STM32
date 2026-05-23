@@ -32,8 +32,6 @@
 #include "CO_app_STM32.h"
 #include "FreeRTOS.h"
 #include "main.h"
-#include "fdcan.h"
-#include "task.h"
 
 /* Local CAN module object */
 static CO_CANmodule_t* CANModule_local = NULL; /* Local instance of global CAN module */
@@ -197,7 +195,7 @@ CO_CANmodule_disable(CO_CANmodule_t* CANmodule) {
 
 /******************************************************************************/
 CO_ReturnError_t
-CO_CANrxBufferInit(CO_CANmodule_t* CANmodule, uint16_t index, uint16_t ident, uint16_t mask, bool_t rtr, void* object,
+ CO_CANrxBufferInit(CO_CANmodule_t* CANmodule, uint16_t index, uint16_t ident, uint16_t mask, bool_t rtr, void* object,
                    void (*CANrx_callback)(void* object, void* message)) {
     CO_ReturnError_t ret = CO_ERROR_NO;
 
@@ -507,100 +505,84 @@ prv_read_can_received_msg(CAN_HandleTypeDef* hcan, uint32_t fifo, uint32_t fifo_
 #ifdef CO_STM32_FDCAN_Driver
     static FDCAN_RxHeaderTypeDef rx_hdr;
     /* Read received message from FIFO */
-    if (HAL_FDCAN_GetRxMessage(hfdcan, fifo, &rx_hdr, rcvMsg.data) != HAL_OK) {
-        return;
-    }
-    /* Setup identifier (with RTR) and length */
-    rcvMsg.ident = rx_hdr.Identifier | (rx_hdr.RxFrameType == FDCAN_REMOTE_FRAME ? FLAG_RTR : 0x00);
-    switch (rx_hdr.DataLength) {
-        case FDCAN_DLC_BYTES_0:
-            rcvMsg.dlc = 0;
-            break;
-        case FDCAN_DLC_BYTES_1:
-            rcvMsg.dlc = 1;
-            break;
-        case FDCAN_DLC_BYTES_2:
-            rcvMsg.dlc = 2;
-            break;
-        case FDCAN_DLC_BYTES_3:
-            rcvMsg.dlc = 3;
-            break;
-        case FDCAN_DLC_BYTES_4:
-            rcvMsg.dlc = 4;
-            break;
-        case FDCAN_DLC_BYTES_5:
-            rcvMsg.dlc = 5;
-            break;
-        case FDCAN_DLC_BYTES_6:
-            rcvMsg.dlc = 6;
-            break;
-        case FDCAN_DLC_BYTES_7:
-            rcvMsg.dlc = 7;
-            break;
-        case FDCAN_DLC_BYTES_8:
-            rcvMsg.dlc = 8;
-            break;
-        default:
-            rcvMsg.dlc = 0;
-            break; /* Invalid length when more than 8 */
-    }
-    rcvMsgIdent = rcvMsg.ident;
-#else
-    static CAN_RxHeaderTypeDef rx_hdr;
-    /* Read received message from FIFO */
-    if (HAL_CAN_GetRxMessage(hcan, fifo, &rx_hdr, rcvMsg.data) != HAL_OK) {
-        return;
-    }
 
-    if(rx_hdr.IDE != CAN_ID_STD)
-    {
-    	return;
-    }
-    /* Setup identifier (with RTR) and length */
-    rcvMsg.ident = rx_hdr.StdId | (rx_hdr.RTR == CAN_RTR_REMOTE ? FLAG_RTR : 0x00);
-    rcvMsg.dlc = rx_hdr.DLC;
-    rcvMsgIdent = rcvMsg.ident;
-#endif
-
-    if (!CAN1_Q_FULL())
-    {
-
-		CanMsg_t *msg = &can_queue1[can_q_head1];
-
-		msg->rxHeader = rx_hdr;
-		memcpy(msg->data, rcvMsg.data, sizeof(rcvMsg.data));
-
-		/* Reject extended IDs */
-		if (msg->rxHeader.IdType != FDCAN_EXTENDED_ID)
-		{
-			 can_q_head1 = CAN_Q_NEXT(can_q_head1);
+		if (HAL_FDCAN_GetRxMessage(hfdcan, fifo, &rx_hdr, rcvMsg.data) != HAL_OK) {
+			return;
 		}
-    }
+		if(rx_hdr.IdType !=	FDCAN_STANDARD_ID)
+			return;
+		/* Setup identifier (with RTR) and length */
+		rcvMsg.ident = rx_hdr.Identifier | (rx_hdr.RxFrameType == FDCAN_REMOTE_FRAME ? FLAG_RTR : 0x00);
+		switch (rx_hdr.DataLength) {
+			case FDCAN_DLC_BYTES_0:
+				rcvMsg.dlc = 0;
+				break;
+			case FDCAN_DLC_BYTES_1:
+				rcvMsg.dlc = 1;
+				break;
+			case FDCAN_DLC_BYTES_2:
+				rcvMsg.dlc = 2;
+				break;
+			case FDCAN_DLC_BYTES_3:
+				rcvMsg.dlc = 3;
+				break;
+			case FDCAN_DLC_BYTES_4:
+				rcvMsg.dlc = 4;
+				break;
+			case FDCAN_DLC_BYTES_5:
+				rcvMsg.dlc = 5;
+				break;
+			case FDCAN_DLC_BYTES_6:
+				rcvMsg.dlc = 6;
+				break;
+			case FDCAN_DLC_BYTES_7:
+				rcvMsg.dlc = 7;
+				break;
+			case FDCAN_DLC_BYTES_8:
+				rcvMsg.dlc = 8;
+				break;
+			default:
+				rcvMsg.dlc = 0;
+				break; /* Invalid length when more than 8 */
+		}
+		rcvMsgIdent = rcvMsg.ident;
+	#else
+		static CAN_RxHeaderTypeDef rx_hdr;
+		/* Read received message from FIFO */
+		if (HAL_CAN_GetRxMessage(hcan, fifo, &rx_hdr, rcvMsg.data) != HAL_OK) {
+			return;
+		}
+		/* Setup identifier (with RTR) and length */
+		rcvMsg.ident = rx_hdr.StdId | (rx_hdr.RTR == CAN_RTR_REMOTE ? FLAG_RTR : 0x00);
+		rcvMsg.dlc = rx_hdr.DLC;
+		rcvMsgIdent = rcvMsg.ident;
+	#endif
 
-    /*
-     * Hardware filters are not used for the moment
-     * \todo: Implement hardware filters...
-     */
-    if (CANModule_local->useCANrxFilters) {
-        __BKPT(0);
-    } else {
-        /*
-         * We are not using hardware filters, hence it is necessary
-         * to manually match received message ID with all buffers
-         */
-        buffer = CANModule_local->rxArray;
-        for (index = CANModule_local->rxSize; index > 0U; --index, ++buffer) {
-            if (((rcvMsgIdent ^ buffer->ident) & buffer->mask) == 0U) {
-                messageFound = 1;
-                break;
-            }
-        }
-    }
+		/*
+		 * Hardware filters are not used for the moment
+		 * \todo: Implement hardware filters...
+		 */
+		if (CANModule_local->useCANrxFilters) {
+			__BKPT(0);
+		} else {
+			/*
+			 * We are not using hardware filters, hence it is necessary
+			 * to manually match received message ID with all buffers
+			 */
+			buffer = CANModule_local->rxArray;
+			for (index = CANModule_local->rxSize; index > 0U; --index, ++buffer) {
+				if (((rcvMsgIdent ^ buffer->ident) & buffer->mask) == 0U) {
+					messageFound = 1;
+					break;
+				}
+			}
+		}
 
-    /* Call specific function, which will process the message */
-    if (messageFound && buffer != NULL && buffer->CANrx_callback != NULL) {
-        buffer->CANrx_callback(buffer->object, (void*)&rcvMsg);
-    }
+		/* Call specific function, which will process the message */
+		if (messageFound && buffer != NULL && buffer->CANrx_callback != NULL) {
+			buffer->CANrx_callback(buffer->object, (void*)&rcvMsg);
+		}
+
 }
 
 #ifdef CO_STM32_FDCAN_Driver
@@ -611,59 +593,16 @@ prv_read_can_received_msg(CAN_HandleTypeDef* hcan, uint32_t fifo, uint32_t fifo_
  * \param[in]       RxFifo0ITs: indicates which Rx FIFO 0 interrupts are signaled.
  */
 void
-HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs)
-{
+ HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs) {
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-	if (RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE)
-	{
-		if(hfdcan == &hfdcan2)
-		{
-			  /* Drain RX FIFO completely */
-			  while (HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0) > 0)
-			  {
-			    if (CAN2_Q_FULL())
-			    {
-			      /* Queue overflow → THIS is your only real loss case */
-			      break;
-			    }
+    if (RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) {
+        prv_read_can_received_msg(hfdcan, FDCAN_RX_FIFO0, RxFifo0ITs);
 
-			    CanMsg_t *msg = &can_queue2[can_q_head2];
+        vTaskNotifyGiveFromISR(CanOpenMenagerTHandle, &xHigherPriorityTaskWoken);
 
-			    if (HAL_FDCAN_GetRxMessage(hfdcan,
-			                              FDCAN_RX_FIFO0,
-			                              &msg->rxHeader,
-			                              msg->data) != HAL_OK)
-			    {
-			      break;
-			    }
-
-			    /* Reject extended IDs */
-			    if (msg->rxHeader.IdType == FDCAN_EXTENDED_ID)
-			    {
-			      continue;
-			    }
-
-			    can_q_head2 = CAN_Q_NEXT(can_q_head2);
-			  }
-
-			  if(can_q_head2 > 0)
-			  {
-			        vTaskNotifyGiveFromISR(canOpenMenagerTHandle, &xHigherPriorityTaskWoken);
-
-			        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-			  }
-
-		}
-		else
-		{
-			prv_read_can_received_msg(hfdcan, FDCAN_RX_FIFO0, RxFifo0ITs);
-
-	        vTaskNotifyGiveFromISR(canOpenMenagerTHandle, &xHigherPriorityTaskWoken);
-
-	        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-		}
-	}
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
 }
 
 /**
@@ -673,58 +612,15 @@ HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs)
  * \param[in]       RxFifo1ITs: indicates which Rx FIFO 0 interrupts are signaled.
  */
 void
-HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo1ITs)
-{
+HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo1ITs) {
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
-    if (RxFifo1ITs & FDCAN_IT_RX_FIFO1_NEW_MESSAGE)
-    {
-		if(hfdcan == &hfdcan2)
-		{
-			  /* Drain RX FIFO completely */
-			  while (HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO1) > 0)
-			  {
-			    if (CAN2_Q_FULL())
-			    {
-			      /* Queue overflow → THIS is your only real loss case */
-			      break;
-			    }
+    if (RxFifo1ITs & FDCAN_IT_RX_FIFO1_NEW_MESSAGE) {
+        prv_read_can_received_msg(hfdcan, FDCAN_RX_FIFO1, RxFifo1ITs);
 
-			    CanMsg_t *msg = &can_queue2[can_q_head2];
+        vTaskNotifyGiveFromISR(CanOpenMenagerTHandle, &xHigherPriorityTaskWoken);
 
-			    if (HAL_FDCAN_GetRxMessage(hfdcan,
-			                              FDCAN_RX_FIFO1,
-			                              &msg->rxHeader,
-			                              msg->data) != HAL_OK)
-			    {
-			      break;
-			    }
-
-			    /* Reject extended IDs */
-			    if (msg->rxHeader.IdType == FDCAN_EXTENDED_ID)
-			    {
-			      continue;
-			    }
-
-			    can_q_head2 = CAN_Q_NEXT(can_q_head2);
-			  }
-
-			  if(can_q_head2 > 0)
-			  {
-			        vTaskNotifyGiveFromISR(canOpenMenagerTHandle, &xHigherPriorityTaskWoken);
-
-			        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-			  }
-
-		}
-		else
-		{
-			prv_read_can_received_msg(hfdcan, FDCAN_RX_FIFO1, RxFifo1ITs);
-
-	        vTaskNotifyGiveFromISR(canOpenMenagerTHandle, &xHigherPriorityTaskWoken);
-
-	        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-		}
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
 }
 
@@ -774,12 +670,7 @@ HAL_FDCAN_TxBufferCompleteCallback(FDCAN_HandleTypeDef* hfdcan, uint32_t BufferI
  */
 void
 HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan) {
-
-	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	prv_read_can_received_msg(hcan, CAN_RX_FIFO0, 0);
-    vTaskNotifyGiveFromISR(canOpenManagerTHandle, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-
+    prv_read_can_received_msg(hcan, CAN_RX_FIFO0, 0);
 }
 
 /**
@@ -789,10 +680,7 @@ HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef* hcan) {
  */
 void
 HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef* hcan) {
-	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     prv_read_can_received_msg(hcan, CAN_RX_FIFO1, 0);
-    vTaskNotifyGiveFromISR(canOpenManagerTHandle, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 /**

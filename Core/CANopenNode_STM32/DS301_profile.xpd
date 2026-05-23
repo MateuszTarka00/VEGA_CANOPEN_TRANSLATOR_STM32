@@ -15,11 +15,11 @@
         <ProfileTechnology>CANopen</ProfileTechnology>
       </ISO15745Reference>
     </ProfileHeader>
-    <ProfileBody xmlns:q1="http://www.canopen.org/xml/1.1" xsi:type="q1:ProfileBody_Device_CANopen" formatName="CANopen" formatVersion="1.0" fileName="DS301_profile.xpd" fileCreator="" fileCreationDate="2020-11-23" fileCreationTime="13:00:00.0000000+02:00" fileModifiedBy="" fileModificationDate="2026-05-11" fileModificationTime="17:50:19.9681540+02:00" fileVersion="1" supportedLanguages="en" xmlns="">
+    <ProfileBody xmlns:q1="http://www.canopen.org/xml/1.1" xsi:type="q1:ProfileBody_Device_CANopen" formatName="CANopen" formatVersion="1.0" fileName="DS301_profile.xpd" fileCreator="" fileCreationDate="2020-11-23" fileCreationTime="13:00:00.0000000+02:00" fileModifiedBy="" fileModificationDate="2026-05-23" fileModificationTime="07:44:03.4914241+02:00" fileVersion="1" supportedLanguages="en" xmlns="">
       <q1:DeviceIdentity>
-        <q1:vendorName>MSDL</q1:vendorName>
+        <q1:vendorName>LIFT-SYSTEM</q1:vendorName>
         <q1:vendorID></q1:vendorID>
-        <q1:productName>BDB</q1:productName>
+        <q1:productName>CANOPEN_VEGA_TRANSLATOR</q1:productName>
         <q1:productID></q1:productID>
         <q1:version versionType="SW">0</q1:version>
         <q1:version versionType="FW">0</q1:version>
@@ -506,7 +506,7 @@
           <q1:parameter uniqueID="UID_SUB_101601" access="readWrite">
             <label lang="en">Consumer heartbeat time</label>
             <UDINT />
-            <q1:defaultValue value="68036" />
+            <q1:defaultValue value="0" />
           </q1:parameter>
           <q1:parameter uniqueID="UID_OBJ_1017" access="readWrite">
             <description lang="en">Heartbeat producer time in ms (0 = disable transmission).</description>
@@ -1220,7 +1220,7 @@
         <ProfileTechnology>CANopen</ProfileTechnology>
       </ISO15745Reference>
     </ProfileHeader>
-    <ProfileBody xmlns:q2="http://www.canopen.org/xml/1.1" xsi:type="q2:ProfileBody_CommunicationNetwork_CANopen" formatName="CANopen" formatVersion="1.0" fileName="DS301_profile.xpd" fileCreator="" fileCreationDate="2020-11-23" fileCreationTime="13:00:00.0000000+02:00" fileModificationDate="2026-05-11" fileModificationTime="17:50:19.9681540+02:00" fileVersion="1" supportedLanguages="en" xmlns="">
+    <ProfileBody xmlns:q2="http://www.canopen.org/xml/1.1" xsi:type="q2:ProfileBody_CommunicationNetwork_CANopen" formatName="CANopen" formatVersion="1.0" fileName="DS301_profile.xpd" fileCreator="" fileCreationDate="2020-11-23" fileCreationTime="13:00:00.0000000+02:00" fileModificationDate="2026-05-23" fileModificationTime="07:44:03.4914241+02:00" fileVersion="1" supportedLanguages="en" xmlns="">
       <ApplicationLayers>
         <q2:CANopenObjectList>
           <CANopenObject index="1000" name="Device type" objectType="7" PDOmapping="no" uniqueIDRef="UID_OBJ_1000" />
@@ -1448,8 +1448,8 @@
         </PhysicalLayer>
       </TransportLayers>
       <NetworkManagement>
-        <CANopenGeneralFeatures granularity="8" nrOfRxPDO="1" nrOfTxPDO="1" layerSettingServiceSlave="true" />
-        <CANopenMasterFeatures />
+        <CANopenGeneralFeatures granularity="8" nrOfRxPDO="1" nrOfTxPDO="1" />
+        <CANopenMasterFeatures layerSettingServiceMaster="true" />
       </NetworkManagement>
     </ProfileBody>
   </ISO15745Profile>
