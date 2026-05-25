@@ -64,7 +64,10 @@ CanOpenNodeObject* createNode(uint32_t id)
 	if(node == NULL)
 		return NULL;
 
+	node->canOpenNodeHandler.vegaTicks = 0;
+	node->canOpenNodeHandler.floorNumber = 0;
 	node->canOpenNodeHandler.canOpenID = id;
+	node->canOpenNodeHandler.vegaConnected = FALSE;
 	node->canOpenNodeHandler.upButtonState = FALSE;
 	node->canOpenNodeHandler.downButtonState = FALSE;
 	node->canOpenNodeHandler.upLedState = FALSE;
@@ -122,4 +125,9 @@ void processCanOpenMessage(CAN_Message_t *msg)
     		FDCAN_Send(0, message, 2);
     	}
     }
+}
+
+CanOpenNodeObject* getCanOpenObjectsList(void)
+{
+	return canOpenNodesList;
 }

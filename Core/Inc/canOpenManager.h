@@ -14,6 +14,9 @@ typedef struct
 {
 	uint32_t canOpenID;
 	CO_NMT_internalState_t nmtState;
+	uint8_t floorNumber;
+	uint32_t vegaTicks;
+	bool vegaConnected;
 	bool upButtonState;
 	bool downButtonState;
 	bool upLedState;
@@ -38,3 +41,5 @@ extern QueueHandle_t canOpenRxQueue;
 
 void CANOPEN_InitRTOS(void);
 void processCanOpenMessage(CAN_Message_t *msg);
+
+extern CanOpenNodeObject* getCanOpenObjectsList(void);
