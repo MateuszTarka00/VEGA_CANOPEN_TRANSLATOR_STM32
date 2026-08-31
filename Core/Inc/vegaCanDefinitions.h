@@ -31,6 +31,10 @@
 #define DOWN_BUTTON_THIRD_BYTE_BLINK_RX		0x41
 #define UP_BUTTON_THIRD_BYTE_BLINK_RX		0x82
 
+//TODO check how vega sends display arrow
+#define LIFT_GOING_UP		0x30
+#define LIFT_GOING_DOWN		0x31
+
 extern const uint8_t inputCanLastByte[20][4];
 
 #endif /* INC_VEGACANDEFINITIONS_H_ */

@@ -72,6 +72,11 @@ CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.downButtonState = FALSE;
 	node->canOpenNodeHandler.upLedState = FALSE;
 	node->canOpenNodeHandler.downLedState = FALSE;
+	node->canOpenNodeHandler.changeFlags = 0;
+	node->canOpenNodeHandler.displayedArrow = 0;
+	node->canOpenNodeHandler.displayedFloor = 0;
+	node->canOpenNodeHandler.doorMap = 0;
+	node->canOpenNodeHandler.liftMap = 0;
 	node->nextObject = NULL;
 
 	return node;
