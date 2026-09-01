@@ -9,11 +9,13 @@
 #define INC_CANOPENLOPDEFINITIONS_H_
 
 #include "main.h"
+#include "canOpenManager.h"
 
 #define MASTER_LOP_TX_ID 0x400
 #define BUTTON_LOP_RX_ID 0x480
 #define CAN_OPEN_RX_ID(NODE_ID) 0x480 + NODE_ID
-#define FLOOR_TO_NODE_ID(floor) 20 + floor
+#define FLOOR_TO_NODE_ID(floor) (20 + floor)
+#define ID_TO_FLOOR_NUMBER(id) (id - 20)
 
 #define MASTER_LOP_TX_LIFT_DOOR 0x600
 #define MASTER_LOP_RX_LIFT_DOOR 0x580
@@ -153,5 +155,8 @@ typedef union
 
 } sdoRxTx;
 
+void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg);
+void processNodeToSendMsg(CanOpenNodeHandler *node);
+void LOP_RequestAssignment(CanOpenNodeHandler *node);
 
 #endif /* INC_CANOPENLOPDEFINITIONS_H_ */

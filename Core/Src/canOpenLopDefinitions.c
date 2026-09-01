@@ -7,7 +7,6 @@
 
 
 #include "canOpenLopDefinitions.h"
-#include "canOpenManager.h"
 
 void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
 {
@@ -143,4 +142,27 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
 
 		node->changeFlags &= (~DISPLAYED_ARROW);
 	}
+}
+
+void LOP_RequestAssignment(CanOpenNodeHandler *node)
+{
+	sdoRxTx msg;
+	uint32_t msgID = MASTER_LOP_TX_LIFT_DOOR + node->canOpenID;
+
+	//request door mask
+	msg.command = LOP_SDO_READ_TX;
+	msg.index = DOOR_MASK;
+	msg.subIndex = 0;
+	memset(msg.returnedData, 0, sizeof(msg.returnedData));
+
+	FDCAN_Send(msgID, msg.data, CAN_OPEN_MSG_SDO_LENGTH);
+
+	//request lift mask
+	msg.command = LOP_SDO_READ_TX;
+	msg.index = LIFT_MASK;
+	msg.subIndex = 0;
+	memset(msg.returnedData, 0, sizeof(msg.returnedData));
+
+	FDCAN_Send(msgID, msg.data, CAN_OPEN_MSG_SDO_LENGTH);
+
 }

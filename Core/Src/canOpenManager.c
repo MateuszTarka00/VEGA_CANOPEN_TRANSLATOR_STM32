@@ -8,6 +8,8 @@
 #include "canOpenManager.h"
 #include "stdlib.h"
 #include "fdcan.h"
+#include "canOpenLopDefinitions.h"
+
 
 CanOpenNodeObject *canOpenNodesList = 0;
 QueueHandle_t canOpenRxQueue;
@@ -65,7 +67,7 @@ CanOpenNodeObject* createNode(uint32_t id)
 		return NULL;
 
 	node->canOpenNodeHandler.vegaTicks = 0;
-	node->canOpenNodeHandler.floorNumber = 0;
+	node->canOpenNodeHandler.floorNumber = ID_TO_FLOOR_NUMBER(id) ;
 	node->canOpenNodeHandler.canOpenID = id;
 	node->canOpenNodeHandler.vegaConnected = FALSE;
 	node->canOpenNodeHandler.upButtonState = FALSE;
@@ -119,6 +121,8 @@ void processCanOpenMessage(CAN_Message_t *msg)
     {
     	appendNode(canOpenId);
     }
+
+    LOP_RequestAssignment(&current->canOpenNodeHandler);
 
     if(msg->id > 0x700 && msg->id < 0x780) //Heartbeat, NMT state
     {
