@@ -65,11 +65,6 @@ void Error_Handler(void);
 /* USER CODE BEGIN Private defines */
 extern osThreadId_t CanOpenMenagerTHandle;
 
-typedef enum
-{
-	FALSE,
-	TRUE
-}bool;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

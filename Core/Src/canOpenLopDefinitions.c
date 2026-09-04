@@ -16,6 +16,7 @@
 
 #include "canOpenLopDefinitions.h"
 #include "string.h" /* For memcpy, memset */
+#include "protocolUtils.h"
 
 /**
  * @brief Decompose and process received CANopen message into node state updates
@@ -33,8 +34,8 @@
  */
 void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
 {
-	/* Validate input parameters */
-	if (node == NULL || msg == NULL) {
+	/* Validate input parameters using shared utility */
+	if (!validatePointer(node) || !validatePointer(msg)) {
 		return; /* Invalid parameters - discard message */
 	}
 
@@ -59,27 +60,25 @@ void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
 			CarCallMessageTx decomposedMsg;
 			memcpy(decomposedMsg.data, msg->data, CAN_OPEN_MSG_PDO_LENGTH);
 
-			/* Update button states based on received value */
+			/* Update button states based on received value using shared utility */
 			switch (decomposedMsg.button)
 			{
 			case DOWN_BUTTON:
-				node->downButtonState = decomposedMsg.button;
-				node->upButtonState = NO_BUTTON;
+				setButtonState(node, DOWN_BUTTON, decomposedMsg.onOff);
 				break;
 			case UP_BUTTON:
-				node->upButtonState = decomposedMsg.button;
-				node->downButtonState = NO_BUTTON;
+				setButtonState(node, UP_BUTTON, decomposedMsg.onOff);
 				break;
 			case BOTH_BUTTONS:
 				/* Both buttons pressed simultaneously */
-				node->upButtonState = decomposedMsg.button;
-				node->downButtonState = decomposedMsg.button;
+				setButtonState(node, UP_BUTTON, decomposedMsg.onOff);
+				setButtonState(node, DOWN_BUTTON, decomposedMsg.onOff);
 				break;
 			case NO_BUTTON:
 			default:
 				/* No button pressed - clear all button states */
-				node->upButtonState = NO_BUTTON;
-				node->downButtonState = NO_BUTTON;
+				setButtonState(node, UP_BUTTON, FALSE);
+				setButtonState(node, DOWN_BUTTON, FALSE);
 				break;
 			}
 		}
@@ -96,11 +95,9 @@ void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
 		uint8_t sizeIndicated = decomposedMessage.command & 0x01;    /* Bit 0: size indicated */
 		uint8_t unusedBytes = (decomposedMessage.command >> 2) & 0x03; /* Bits 3-2: unused bytes count */
 
-		uint8_t dataLength = 0;
-
-		/* Calculate actual data length for expedited transfers */
+		/* Calculate actual data length for expedited transfers (for future use) */
 		if (expedited && sizeIndicated) {
-			dataLength = 4 - unusedBytes; /* Valid range: 1-4 bytes */
+			/* dataLength = 4 - unusedBytes; */ /* Valid range: 1-4 bytes */
 		}
 
 		/* Update node configuration based on Object Dictionary index */
@@ -109,6 +106,12 @@ void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
 			case LIFT_MASK:
 				/* Lift availability mask - indicates which lifts are available */
 				node->liftMap = decomposedMessage.returnedData[0];
+				node->liftMapReceived = TRUE;
+				/* Clear LOP request flag only when BOTH liftMap AND doorMap have been received */
+				if (node->doorMapReceived) {
+					node->lopRequestNeeded = FALSE;
+					node->lopRequestAttempts = 0;
+				}
 				break;
 			case FLOOR_NUMBER:
 				/* Current floor number in the building */
@@ -117,6 +120,12 @@ void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
 			case DOOR_MASK:
 				/* Door configuration mask - indicates which doors are active */
 				node->doorMap = decomposedMessage.returnedData[0];
+				node->doorMapReceived = TRUE;
+				/* Clear LOP request flag only when BOTH liftMap AND doorMap have been received */
+				if (node->liftMapReceived) {
+					node->lopRequestNeeded = FALSE;
+					node->lopRequestAttempts = 0;
+				}
 				break;
 			default:
 				/* Unknown Object Dictionary entry - ignore */
@@ -168,7 +177,7 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
 		msg.onOff = node->upLedState;
 
 		/* Transmit message */
-		FDCAN_Send(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH);
+		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
 		/* Clear change flag after transmission */
 		node->changeFlags &= (~UP_LED_STATE);
@@ -187,7 +196,7 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
 		msg.onOff = node->downLedState; /* BUG FIX: Was using upLedState, should use downLedState */
 
 		/* Transmit message */
-		FDCAN_Send(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH);
+		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
 		/* Clear change flag after transmission */
 		node->changeFlags &= (~DOWN_LED_STATE);
@@ -206,7 +215,7 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
 		msg.onOff = TRUE; /* Always enable floor display */
 
 		/* Transmit message */
-		FDCAN_Send(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH);
+		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
 		/* Clear change flag after transmission */
 		node->changeFlags &= (~DISPLAYED_FLOOR);
@@ -224,13 +233,13 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
 		msg.arrowIndicator = BOTH_ARROWS; /* Clear all arrows */
 		msg.onOff = FALSE; /* Disable all arrows */
 
-		FDCAN_Send(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH);
+		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
 		/* Then, enable only the desired arrow indicator */
 		msg.arrowIndicator = node->displayedArrow;
 		msg.onOff = TRUE; /* Enable selected arrow */
 
-		FDCAN_Send(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH);
+		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
 		/* Clear change flag after transmission */
 		node->changeFlags &= (~DISPLAYED_ARROW);
@@ -271,7 +280,7 @@ void LOP_RequestAssignment(CanOpenNodeHandler *node)
 	msg.subIndex = 0;      /* No sub-index needed for single-byte values */
 	memset(msg.returnedData, 0, sizeof(msg.returnedData)); /* Clear response area */
 
-	FDCAN_Send(msgID, msg.data, CAN_OPEN_MSG_SDO_LENGTH);
+	protocolSend(msgID, msg.data, CAN_OPEN_MSG_SDO_LENGTH, PROTOCOL_CANOPEN);
 
 	/* Request 2: Lift Mask configuration */
 	/* Compose SDO read request command */
@@ -280,5 +289,5 @@ void LOP_RequestAssignment(CanOpenNodeHandler *node)
 	msg.subIndex = 0;      /* No sub-index needed for single-byte values */
 	memset(msg.returnedData, 0, sizeof(msg.returnedData)); /* Clear response area */
 
-	FDCAN_Send(msgID, msg.data, CAN_OPEN_MSG_SDO_LENGTH);
+	protocolSend(msgID, msg.data, CAN_OPEN_MSG_SDO_LENGTH, PROTOCOL_CANOPEN);
 }

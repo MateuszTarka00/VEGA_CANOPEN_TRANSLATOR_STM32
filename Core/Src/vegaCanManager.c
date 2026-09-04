@@ -20,6 +20,12 @@
 #include "vegaCanManager.h"
 #include "flash.h"
 #include "vegaCanDefinitions.h"
+#include "protocolUtils.h"
+#include "semphr.h"
+#include "fdcan.h"
+
+/* Extern declaration of the mutex from canOpenManager for thread-safe list access */
+extern SemaphoreHandle_t canOpenNodesListMutex;
 
 /* ============================================================================ */
 /* VEGA PROTOCOL TIMING CONSTANTS (milliseconds)                             */
@@ -35,16 +41,6 @@
 #define TIME_SEND_CONNECTED         100
 
 /* ============================================================================ */
-/* VEGA MESSAGE ID MAPPINGS                                                  */
-/* ============================================================================ */
-
-/** @brief Base CAN ID for TX messages (adds floor number offset) */
-#define FIRST_SEND_ID               0x200
-
-/** @brief Base CAN ID for RX messages (receives from panel) */
-#define FIRST_RECEIVE_ID            0x80
-
-/* ============================================================================ */
 /* VEGA MESSAGE FORMAT                                                        */
 /* ============================================================================ */
 
@@ -57,6 +53,10 @@
 
 /** @brief Queue handle for receiving VEGA messages from CAN ISR */
 QueueHandle_t vegaRxQueue;
+
+/* ============================================================================ */
+/* FORWARD DECLARATIONS - Callback functions defined later in this file       */
+/* ============================================================================ */
 
 /**
  * @brief Initialize FreeRTOS queue for VEGA message reception
@@ -76,46 +76,69 @@ void VEGA_InitRTOS(void)
 			/* Halt system - unable to continue */
 		}
 	}
+
+	/* NOTE: Callbacks are handled by HAL_FDCAN_RxFifo0Callback and HAL_FDCAN_RxFifo1Callback
+	 * implemented in protocolUtils.c. These are strong implementations that override the weak
+	 * HAL driver stubs and route messages to the appropriate queue based on FDCAN handle. */
 }
 
 /**
- * @brief Process received VEGA message and extract button/state information
+ * @brief Process received VEGA message and update LED states
  * 
- * Parses VEGA protocol messages to extract button press states and other
- * status information. This is called from the receive task after a message
- * has been dequeued from vegaRxQueue.
+ * Parses VEGA protocol messages to update the corresponding CANopen node's
+ * LED indicator states. Button state handling is done through CANopen protocol.
+ * This function only manages the LED feedback states based on VEGA status.
+ * 
+ * VEGA message ID to CANopen node mapping:
+ * - VEGA RX message ID: 0x80 + floor number (0-19)
+ * - CANopen node ID: 20 + floor number (20-39)
+ * 
+ * LED State Updates:
+ * - Constant press (0x01/0x02): LED stays lit (indicates button pressed)
+ * - Blinking (0x41/0x82): LED blinks (indicates waiting for acknowledgment)
  * 
  * @param msg Pointer to received CAN message
  * @return None
  * @warning Message parameter must be a valid non-NULL pointer
+ * @note Button state updates are handled by CANopen protocol layer
  */
 void processVegaMessage(CAN_Message_t *msg)
 {
-	/* Validate input parameter */
-	if (msg == NULL) {
-		return; /* Invalid message pointer */
+	/* Validate message using shared utility (checks null, length, ID range) */
+	if (!validateMessage(msg, 3, 4, FIRST_RECEIVE_ID, FIRST_RECEIVE_ID + 20)) {
+		return; /* Message failed validation */
 	}
 
-	/* Validate message has required data bytes */
-	if (msg->len < 3) {
-		return; /* Insufficient data for VEGA protocol parsing */
+	/* Extract floor number from VEGA RX message ID using shared utility */
+	uint8_t floorNumber = extractFloorFromVegaId(msg->id);
+	if (floorNumber == 0xFF) {
+		return; /* Invalid floor number (already validated by validateMessage, but defensive) */
 	}
 
-	/* Parse button state from third byte (byte index 2) */
+	/* Convert floor to CANopen node ID (20 + floor number) */
+	uint32_t canOpenNodeId = floorToCanOpenId(floorNumber);
+
+	/* Find corresponding CANopen node in linked list using shared utility */
+	CanOpenNodeObject* nodePtr = findNodeById(getCanOpenObjectsList(), canOpenNodeId);
+	if (nodePtr == NULL) {
+		return; /* Cannot update non-existent node */
+	}
+
+	/* Parse LED state from third byte (byte index 2) and update using shared utility */
 	switch (msg->data[2])
 	{
 	case DOWN_BUTTON_THIRD_BYTE_CONST_RX:
-		/* DOWN button pressed (constant state) */
-		break;
-	case UP_BUTTON_THIRD_BYTE_CONST_RX:
-		/* UP button pressed (constant state) */
-		break;
 	case DOWN_BUTTON_THIRD_BYTE_BLINK_RX:
-		/* DOWN button blinking (flashing state) */
+		/* DOWN button pressed or blinking - light DOWN LED */
+		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE, TRUE);
 		break;
+
+	case UP_BUTTON_THIRD_BYTE_CONST_RX:
 	case UP_BUTTON_THIRD_BYTE_BLINK_RX:
-		/* UP button blinking (flashing state) */
+		/* UP button pressed or blinking - light UP LED */
+		setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, TRUE);
 		break;
+
 	default:
 		/* Unknown button state - ignore */
 		break;
@@ -151,7 +174,12 @@ void vegaTransmitSubTask(void)
 		return; /* No nodes to transmit for */
 	}
 
-	/* Iterate through all CANopen nodes */
+	/* Acquire mutex to safely traverse the node list */
+	if (xSemaphoreTake(canOpenNodesListMutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+		return; /* Timeout acquiring mutex - skip this transmit cycle */
+	}
+
+	/* Iterate through all CANopen nodes (protected by mutex) */
 	while (canOpenObjects != NULL) {
 		/* Calculate transmission interval based on connection status */
 		uint32_t txInterval = canOpenObjects->canOpenNodeHandler.vegaConnected ?
@@ -164,7 +192,7 @@ void vegaTransmitSubTask(void)
 		}
 
 		/* Calculate CAN message ID for this floor/node */
-		sendID = FIRST_SEND_ID + canOpenObjects->canOpenNodeHandler.floorNumber;
+		sendID = FIRST_SEND_ID + canOpenObjects->canOpenNodeHandler.floorNumber - 1; //TODO to be checked for correctness
 
 		/* Validate sendID doesn't exceed array bounds */
 		if (sendID - FIRST_SEND_ID >= 20) {
@@ -205,7 +233,7 @@ void vegaTransmitSubTask(void)
 		}
 
 		/* Transmit VEGA message */
-		FDCAN_Send(sendID, message, CAN_MESSAGE_SIZE);
+		protocolSend(sendID, message, CAN_MESSAGE_SIZE, PROTOCOL_VEGA);  /* VEGA protocol */
 
 		/* Update last transmission timestamp */
 		canOpenObjects->canOpenNodeHandler.vegaTicks = ticksNow;
@@ -213,6 +241,12 @@ void vegaTransmitSubTask(void)
 		/* Move to next node in linked list */
 		canOpenObjects = canOpenObjects->nextObject;
 	}
+	
+	/* Release mutex after traversal complete */
+	xSemaphoreGive(canOpenNodesListMutex);
+
+	/* Release mutex after traversal complete */
+	xSemaphoreGive(canOpenNodesListMutex);
 }
 
 /**
@@ -226,45 +260,8 @@ void vegaTransmitSubTask(void)
  * @param RxFifo0ITs Flags indicating which RX FIFO0 interrupt(s) occurred
  * @return None
  * @note Called from ISR context - must be fast and reentrant-safe
+ * @note Implementation is in protocolUtils.c as HAL_FDCAN_RxFifo0Callback
  */
-void vegaRxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs)
-{
-    FDCAN_RxHeaderTypeDef rxHeader;
-    CAN_Message_t msg = {0};  /* Initialize to zero for safety */
-    BaseType_t hpw = pdFALSE; /* Higher Priority Woken flag */
-
-    /* Validate input parameter */
-    if (hfdcan == NULL) {
-        return; /* Invalid handle */
-    }
-
-    /* Retrieve message from hardware FIFO */
-    HAL_StatusTypeDef status = HAL_FDCAN_GetRxMessage(
-        hfdcan,
-        FDCAN_RX_FIFO0,
-        &rxHeader,
-        msg.data
-    );
-
-    /* Validate message retrieval */
-    if (status != HAL_OK) {
-        return; /* Message retrieval failed */
-    }
-
-    /* Copy message metadata from hardware header */
-    msg.id = rxHeader.Identifier;
-    msg.len = DLC2LEN(rxHeader.DataLength); /* Convert FDCAN DLC to byte count */
-
-    /* Queue message for task-context processing */
-    xQueueSendFromISR(
-        vegaRxQueue,
-        &msg,
-        &hpw
-    );
-
-    /* Yield to higher priority tasks if one was woken */
-    portYIELD_FROM_ISR(hpw);
-}
 
 /**
  * @brief FDCAN RX FIFO1 interrupt callback handler
@@ -273,49 +270,9 @@ void vegaRxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs)
  * context when a message is received. Extracts message data and queues it
  * for processing in task context.
  * 
- * Note: Naming typo preserved from original ("allback" instead of "callback")
- * to maintain backward compatibility if called from elsewhere.
- * 
  * @param hfdcan Pointer to FDCAN handle
  * @param RxFifo1ITs Flags indicating which RX FIFO1 interrupt(s) occurred
  * @return None
  * @note Called from ISR context - must be fast and reentrant-safe
+ * @note Implementation is in protocolUtils.c as HAL_FDCAN_RxFifo1Callback
  */
-void vegaRxFifo1allback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo1ITs)
-{
-    FDCAN_RxHeaderTypeDef rxHeader;
-    CAN_Message_t msg = {0};  /* Initialize to zero for safety */
-    BaseType_t hpw = pdFALSE; /* Higher Priority Woken flag */
-
-    /* Validate input parameter */
-    if (hfdcan == NULL) {
-        return; /* Invalid handle */
-    }
-
-    /* Retrieve message from hardware FIFO */
-    HAL_StatusTypeDef status = HAL_FDCAN_GetRxMessage(
-        hfdcan,
-        FDCAN_RX_FIFO1,
-        &rxHeader,
-        msg.data
-    );
-
-    /* Validate message retrieval */
-    if (status != HAL_OK) {
-        return; /* Message retrieval failed */
-    }
-
-    /* Copy message metadata from hardware header */
-    msg.id = rxHeader.Identifier;
-    msg.len = DLC2LEN(rxHeader.DataLength); /* Convert FDCAN DLC to byte count */
-
-    /* Queue message for task-context processing */
-    xQueueSendFromISR(
-        vegaRxQueue,
-        &msg,
-        &hpw
-    );
-
-    /* Yield to higher priority tasks if one was woken */
-    portYIELD_FROM_ISR(hpw);
-}

@@ -26,14 +26,14 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "CO_app_STM32.h"
 #include "tim.h"
 #include "fdcan.h"
-#include "NMT_functions.h"
-#include "OD.h"
 #include "softwareTimer_ms.h"
 #include "iwdg.h"
 #include "canOpenManager.h"
+#include "canOpenLopDefinitions.h"
+#include "vegaCanManager.h"
+#include "protocolUtils.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,10 +44,9 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define CANOPEN_TASK_DELAY_MS 			1
-
+#define HEARTBEAT_INTERVAL_MS			1000
+#define VEGA_TX_INTERVAL_MS				100
 #define CANOPEN_ID						1
-#define COB_ID							0x480 + CANOPEN_ID
-#define TPDO_INDEX						0x1800
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -189,6 +188,7 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
 	CANOPEN_InitRTOS();
+	VEGA_InitRTOS();
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -217,6 +217,8 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE BEGIN Header_tranciever */
 /**
   * @brief  Function implementing the TrancieverT thread.
+  * @brief  Responsible for:
+  *         - Transmitting VEGA protocol messages to elevator panel
   * @param  argument: Not used
   * @retval None
   */
@@ -227,7 +229,10 @@ void tranciever(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    /* Transmit VEGA messages to elevator panel based on node states */
+    vegaTransmitSubTask();
+    
+    osDelay(10);
   }
   /* USER CODE END tranciever */
 }
@@ -235,6 +240,12 @@ void tranciever(void *argument)
 /* USER CODE BEGIN Header_canOpenMenager */
 /**
 * @brief Function implementing the CanOpenMenagerT thread.
+* @brief Responsible for:
+*        - Sending CANopen master heartbeat every 1 second
+*        - Processing received CANopen messages (LOP messages, button states, device config)
+*        - Managing CANopen node state machine and NMT transitions
+*        - Handling SDO requests for device configuration
+*        - Transmitting CANopen node messages (LED states, floor display)
 * @param argument: Not used
 * @retval None
 */
@@ -242,48 +253,62 @@ void tranciever(void *argument)
 void canOpenMenager(void *argument)
 {
   /* USER CODE BEGIN canOpenMenager */
-
-	  canOpenNodeSTM32.CANHandle = &hfdcan1;
-	  canOpenNodeSTM32.HWInitFunction = MX_FDCAN1_Init;
-	  canOpenNodeSTM32.timerHandle = &htim14;
-	  canOpenNodeSTM32.desiredNodeID = CANOPEN_ID;
-	  canOpenNodeSTM32.baudrate = 250;
-
-	  uint32_t correctTpdo1CobId = COB_ID;
-
-	  //Set COB-ID for TPDO
-	  OD_entry_t *tpdoCommEntry = OD_find(OD, TPDO_INDEX);
-	  if (tpdoCommEntry != NULL) {
-	      OD_IO_t io;
-
-	      // Get subindex 1 — COB-ID
-	      if (OD_getSub(tpdoCommEntry, 1, &io, 0) == ODR_OK) {
-	          uint32_t *cobIdPtr = (uint32_t *)io.stream.dataOrig;
-
-	          // Disable PDO temporarily (set bit 31)
-	          *cobIdPtr |= 0x80000000;
-
-	          // Update COB-ID
-	          *cobIdPtr = correctTpdo1CobId;
-
-	          // Re-enable PDO (clear bit 31)
-	          *cobIdPtr &= ~0x80000000;
-	      }
-	  }
-
-	  canopen_app_init(&canOpenNodeSTM32);
-	  CO_NMT_initCallbackChanged(canOpenNodeSTM32.canOpenStack->NMT, nmtStateChangedCallback);
+  CanOpenNodeObject* nodePtr = NULL;
+  TickType_t lastHeartbeatTime = xTaskGetTickCount();
+  
 	  /* Infinite loop */
 	  for(;;)
 	  {
-//	    HAL_IWDG_Refresh(&hiwdg);
-		HAL_GPIO_WritePin(CAN_OK_GPIO_Port, CAN_OK_Pin , canOpenNodeSTM32.outStatusLEDGreen);
-		HAL_GPIO_WritePin(CAN_FAULT_GPIO_Port, CAN_FAULT_Pin, canOpenNodeSTM32.outStatusLEDRed);
-
-		canopen_app_interrupt();
-		canopen_app_process();
-
+	    HAL_IWDG_Refresh(&hiwdg);
 		ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CANOPEN_TASK_DELAY_MS));
+		
+		TickType_t currentTime = xTaskGetTickCount();
+		
+		/* Send master heartbeat every 1 second */
+		if ((currentTime - lastHeartbeatTime) >= pdMS_TO_TICKS(HEARTBEAT_INTERVAL_MS))
+		{
+		  CANOPEN_SendMasterHeartbeat();
+		  lastHeartbeatTime = currentTime;
+		}
+		
+		/* Process all nodes for NMT state transitions and LOP requests */
+		nodePtr = getCanOpenObjectsList();
+		while (nodePtr != NULL)
+		{
+		  /* Handle NMT state transitions: PRE_OPERATIONAL -> OPERATIONAL */
+		  if (nodePtr->canOpenNodeHandler.nmtState == CO_NMT_PRE_OPERATIONAL)
+		  {
+			/* Send NMT start command to transition to operational state */
+			uint8_t nmtMessage[2] = {1, nodePtr->canOpenNodeHandler.canOpenID};
+			protocolSend(0x000, nmtMessage, 2, PROTOCOL_CANOPEN);
+		  }
+		  
+		  /* Handle LOP requests: Send after NMT handshake initiated */
+		  if (nodePtr->canOpenNodeHandler.lopRequestNeeded)
+		  {
+			/* Check if enough time has passed since last request (500ms retry interval) */
+			if ((currentTime - nodePtr->canOpenNodeHandler.lastLopRequestTime) >= pdMS_TO_TICKS(500))
+			{
+			  /* Send LOP request */
+			  LOP_RequestAssignment(&nodePtr->canOpenNodeHandler);
+			  
+			  /* Update tracking: increment attempts and record time */
+			  nodePtr->canOpenNodeHandler.lastLopRequestTime = currentTime;
+			  nodePtr->canOpenNodeHandler.lopRequestAttempts++;
+			  
+			  /* Clear flag after max attempts (3 tries) to avoid infinite retry */
+			  if (nodePtr->canOpenNodeHandler.lopRequestAttempts >= 3)
+			  {
+				nodePtr->canOpenNodeHandler.lopRequestNeeded = FALSE;
+			  }
+			}
+		  }
+		  
+		  /* Process and send CANopen node messages (LED updates, floor display, etc) */
+		  processNodeToSendMsg(&nodePtr->canOpenNodeHandler);
+		  
+		  nodePtr = nodePtr->nextObject;
+		}
 	  }
   /* USER CODE END canOpenMenager */
 }
@@ -291,6 +316,9 @@ void canOpenMenager(void *argument)
 /* USER CODE BEGIN Header_vegaRx */
 /**
 * @brief Function implementing the VegaRxT thread.
+* @brief Responsible for:
+*        - Processing received VEGA protocol messages from queue
+*        - Updating CANopen node LED states based on button/arrow presses
 * @param argument: Not used
 * @retval None
 */
@@ -298,10 +326,17 @@ void canOpenMenager(void *argument)
 void vegaRx(void *argument)
 {
   /* USER CODE BEGIN vegaRx */
+  CAN_Message_t msg;
+  
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    /* Process received VEGA messages from queue */
+    if (xQueueReceive(vegaRxQueue, &msg, pdMS_TO_TICKS(100)) == pdTRUE)
+    {
+      /* Update CANopen node LED states from VEGA button messages */
+      processVegaMessage(&msg);
+    }
   }
   /* USER CODE END vegaRx */
 }
@@ -322,7 +357,7 @@ void canOpenRx(void *argument)
 	CAN_Message_t msg;
 	if(xQueueReceive(canOpenRxQueue, &msg, portMAX_DELAY) == pdTRUE)
 	{
-//		HAL_IWDG_Refresh(&hiwdg);
+		HAL_IWDG_Refresh(&hiwdg);
 		processCanOpenMessage(&msg);
 	}
   }

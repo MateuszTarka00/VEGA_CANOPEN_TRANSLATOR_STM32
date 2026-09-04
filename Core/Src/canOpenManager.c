@@ -16,12 +16,21 @@
 #include "stdlib.h"
 #include "fdcan.h"
 #include "canOpenLopDefinitions.h"
+#include "protocolUtils.h"
+#include "semphr.h"
 
 /* Global linked list of CANopen node objects */
 CanOpenNodeObject *canOpenNodesList = NULL;
 
 /* Queue handle for receiving CANopen CAN messages - populated by ISR */
 QueueHandle_t canOpenRxQueue;
+
+/* Mutex for protecting canOpenNodesList from race conditions */
+SemaphoreHandle_t canOpenNodesListMutex = NULL;
+
+/* ============================================================================ */
+/* FORWARD DECLARATIONS - Callback functions defined later in this file       */
+/* ============================================================================ */
 
 /**
  * @brief Initialize FreeRTOS queue for CANopen message reception
@@ -41,81 +50,19 @@ void CANOPEN_InitRTOS(void)
 			/* Halt system - unable to continue */
 		}
 	}
-}
 
-/**
- * @brief Convert byte count to FDCAN Data Length Code (DLC)
- * 
- * Maps the number of data bytes to the appropriate FDCAN DLC value.
- * FDCAN supports 0-8 bytes of data in classic CAN format.
- * 
- * @param len Number of data bytes (0-8)
- * @return FDCAN DLC constant value
- * @note Values >8 default to FDCAN_DLC_BYTES_8 for safety
- */
-static uint32_t FDCAN_BytesToDLC(uint8_t len)
-{
-    switch (len)
-    {
-        case 0: return FDCAN_DLC_BYTES_0;
-        case 1: return FDCAN_DLC_BYTES_1;
-        case 2: return FDCAN_DLC_BYTES_2;
-        case 3: return FDCAN_DLC_BYTES_3;
-        case 4: return FDCAN_DLC_BYTES_4;
-        case 5: return FDCAN_DLC_BYTES_5;
-        case 6: return FDCAN_DLC_BYTES_6;
-        case 7: return FDCAN_DLC_BYTES_7;
-        case 8: return FDCAN_DLC_BYTES_8;
-        default: return FDCAN_DLC_BYTES_8; /* Safety fallback for invalid lengths */
-    }
-}
+	/* Create mutex for protecting linked list access from race conditions */
+	canOpenNodesListMutex = xSemaphoreCreateMutex();
+	if (canOpenNodesListMutex == NULL) {
+		/* Mutex creation failed - system is out of heap memory */
+		while (1) {
+			/* Halt system - unable to continue */
+		}
+	}
 
-/**
- * @brief Send a CAN message via FDCAN1 interface
- * 
- * Queues a CAN message for transmission on the FDCAN1 bus. Waits for
- * available space in the TX FIFO with a timeout to prevent deadlock.
- * 
- * @param id CAN message identifier (11-bit standard ID)
- * @param data Pointer to message data (1-8 bytes)
- * @param len Number of data bytes to send (0-8)
- * @return None
- * @warning Function will spin-wait if TX FIFO is full. Consider timeout protection.
- */
-void FDCAN_Send(uint16_t id, uint8_t *data, uint8_t len)
-{
-    FDCAN_TxHeaderTypeDef TxHeader;
-    uint32_t timeoutTicks = 0;
-    const uint32_t MAX_WAIT_TICKS = 100; /* ~100ms timeout */
-
-    /* Validate input parameters */
-    if (data == NULL || len > 8) {
-        return; /* Invalid parameters - discard message */
-    }
-
-    /* Configure CAN message header */
-    TxHeader.Identifier = id;
-    TxHeader.IdType = FDCAN_STANDARD_ID;
-    TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-    TxHeader.DataLength = FDCAN_BytesToDLC(len);
-    TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-    TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
-    TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
-    TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-    TxHeader.MessageMarker = 0;
-
-    /* Wait for TX FIFO space with timeout to prevent deadlock */
-    while (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) == 0)
-    {
-        vTaskDelay(pdMS_TO_TICKS(1)); /* Yield CPU */
-        timeoutTicks++;
-        if (timeoutTicks >= MAX_WAIT_TICKS) {
-            return; /* Timeout - discard message */
-        }
-    }
-
-    /* Queue message for transmission */
-    HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &TxHeader, data);
+	/* NOTE: Callbacks are handled by HAL_FDCAN_RxFifo0Callback and HAL_FDCAN_RxFifo1Callback
+	 * implemented in protocolUtils.c. These are strong implementations that override the weak
+	 * HAL driver stubs and route messages to the appropriate queue based on FDCAN handle. */
 }
 
 /**
@@ -151,6 +98,12 @@ static CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.displayedFloor = 0;
 	node->canOpenNodeHandler.doorMap = 0;
 	node->canOpenNodeHandler.liftMap = 0;
+	/* LOP request tracking - will be handled by CanOpenMenagerT after NMT handshake */
+	node->canOpenNodeHandler.lopRequestNeeded = FALSE;
+	node->canOpenNodeHandler.lastLopRequestTime = 0;
+	node->canOpenNodeHandler.lopRequestAttempts = 0;
+	node->canOpenNodeHandler.liftMapReceived = FALSE;
+	node->canOpenNodeHandler.doorMapReceived = FALSE;
 	node->nextObject = NULL;
 
 	return node;
@@ -162,21 +115,29 @@ static CanOpenNodeObject* createNode(uint32_t id)
  * Searches for the end of the linked list and appends a newly created node.
  * If the list is empty, the new node becomes the head.
  * 
+ * THREAD-SAFE: Acquires canOpenNodesListMutex for protected access
+ * 
  * @param id CANopen node ID to create
  * @return None
- * @warning Not thread-safe - must be protected by critical section if called from multiple tasks
  */
 static void appendNode(uint32_t id)
 {
+	/* Acquire mutex to protect list modification */
+	if (xSemaphoreTake(canOpenNodesListMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+		return; /* Timeout acquiring mutex - abandon operation */
+	}
+
 	/* Create new node first */
 	CanOpenNodeObject *newNode = createNode(id);
 	if (newNode == NULL) {
+		xSemaphoreGive(canOpenNodesListMutex);
 		return; /* Node creation failed - discard */
 	}
 
 	/* If list is empty, make this the head node */
 	if (canOpenNodesList == NULL) {
 		canOpenNodesList = newNode;
+		xSemaphoreGive(canOpenNodesListMutex);
 		return;
 	}
 
@@ -187,6 +148,9 @@ static void appendNode(uint32_t id)
 	}
 
 	current->nextObject = newNode;
+	
+	/* Release mutex */
+	xSemaphoreGive(canOpenNodesListMutex);
 }
 
 /**
@@ -216,7 +180,11 @@ void processCanOpenMessage(CAN_Message_t *msg)
 	/* CANopen COB-ID to node ID mapping: lower 7 bits contain node ID */
 	uint32_t canOpenId = msg->id & 0x7F;
 
-	/* Search linked list for matching node ID */
+	/* Search linked list for matching node ID (with mutex protection) */
+	if (xSemaphoreTake(canOpenNodesListMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+		return; /* Timeout acquiring mutex */
+	}
+
 	CanOpenNodeObject *current = canOpenNodesList;
 	while (current != NULL) {
 		if (current->canOpenNodeHandler.canOpenID == canOpenId) {
@@ -225,10 +193,17 @@ void processCanOpenMessage(CAN_Message_t *msg)
 		current = current->nextObject;
 	}
 
+	xSemaphoreGive(canOpenNodesListMutex);
+
 	/* Create new node if not found in list */
 	if (current == NULL) {
 		appendNode(canOpenId);
-		/* Retrieve newly created node */
+		
+		/* Retrieve newly created node (with mutex protection) */
+		if (xSemaphoreTake(canOpenNodesListMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+			return; /* Timeout acquiring mutex */
+		}
+		
 		current = canOpenNodesList;
 		while (current != NULL) {
 			if (current->canOpenNodeHandler.canOpenID == canOpenId) {
@@ -237,25 +212,23 @@ void processCanOpenMessage(CAN_Message_t *msg)
 			current = current->nextObject;
 		}
 
+		xSemaphoreGive(canOpenNodesListMutex);
+
 		if (current == NULL) {
 			return; /* Failed to create/find node - critical error */
 		}
 	}
 
 	/* Request device configuration from the newly found/created node */
-	LOP_RequestAssignment(&current->canOpenNodeHandler);
+	/* NOTE: LOP request will be sent by CanOpenMenagerT after NMT handshake complete */
+	current->canOpenNodeHandler.lopRequestNeeded = TRUE;
 
 	/* Process heartbeat and NMT state messages (COB-ID 0x700-0x7FF) */
-	if (msg->id >= 0x700 && msg->id <= 0x77F) {
+	if (msg->id >= CAN_OPEN_HEARTBEAT_MSG_ID && msg->id <= 0x77F) {
 		/* Extract NMT state from last byte of heartbeat message */
 		current->canOpenNodeHandler.nmtState = msg->data[msg->len - 1];
 
-		/* Handle pre-operational state */
-		if (current->canOpenNodeHandler.nmtState == CO_NMT_PRE_OPERATIONAL) {
-			/* Send NMT start command to transition to operational state */
-			uint8_t nmtMessage[2] = {1, canOpenId}; /* Command: start, Node ID */
-			FDCAN_Send(0x000, nmtMessage, 2); /* NMT command COB-ID is 0x000 */
-		}
+		/* NOTE: NMT start command will be sent by CanOpenMenagerT when PRE_OPERATIONAL detected */
 	}
 }
 
@@ -272,3 +245,67 @@ CanOpenNodeObject* getCanOpenObjectsList(void)
 {
 	return canOpenNodesList;
 }
+
+/**
+ * @brief Send CANopen master heartbeat message
+ * 
+ * Transmits a heartbeat message from the master node (node ID 1) to indicate it is alive
+ * and operational. The heartbeat is sent periodically regardless of network or
+ * slave node states, making it suitable for continuous operation.
+ * 
+ * According to CANopen CiA 301 specification:
+ * - Heartbeat COB-ID: 0x701 (0x700 + master node ID 1)
+ * - Heartbeat payload: 1 byte containing the master NMT state
+ * - Purpose: Network monitoring and error detection
+ * 
+ * This function should be called periodically (e.g., every 100-500ms) from
+ * the main application loop or a FreeRTOS timer callback.
+ * 
+ * @return None
+ * @note Master heartbeat is independent of slave node states and always transmits
+ * @note Master node ID is fixed to 1 for this system
+ * @see CiA 301 - Heartbeat Protocol Specification
+ */
+void CANOPEN_SendMasterHeartbeat(void)
+{
+	/* Master node ID is fixed to 1 for this elevator system */
+	const uint8_t MASTER_NODE_ID = 1;
+
+	/* Calculate heartbeat COB-ID (0x700 + node ID = 0x701) */
+	uint16_t heartbeatCobId = CAN_OPEN_HEARTBEAT_MSG_ID + MASTER_NODE_ID;
+
+	/* Construct heartbeat message: single byte with master NMT state */
+	/* Master is always operational to coordinate the network */
+	uint8_t heartbeatData[1] = {CO_NMT_OPERATIONAL};
+
+	/* Transmit master heartbeat */
+	protocolSend(heartbeatCobId, heartbeatData, 1, PROTOCOL_CANOPEN);
+}
+
+/**
+ * @brief FDCAN RX FIFO0 interrupt callback handler for CANopen messages
+ * 
+ * Processes received CAN messages from FDCAN RX FIFO0. Called from interrupt
+ * context when a message is received. Extracts message data and queues it
+ * for processing in task context.
+ * 
+ * @param hfdcan Pointer to FDCAN handle
+ * @param RxFifo0ITs Flags indicating which RX FIFO0 interrupt(s) occurred
+ * @return None
+ * @note Called from ISR context - must be fast and reentrant-safe
+ * @note Implementation is in protocolUtils.c as HAL_FDCAN_RxFifo0Callback
+ */
+
+/**
+ * @brief FDCAN RX FIFO1 interrupt callback handler for CANopen messages
+ * 
+ * Processes received CAN messages from FDCAN RX FIFO1. Called from interrupt
+ * context when a message is received. Extracts message data and queues it
+ * for processing in task context.
+ * 
+ * @param hfdcan Pointer to FDCAN handle
+ * @param RxFifo1ITs Flags indicating which RX FIFO1 interrupt(s) occurred
+ * @return None
+ * @note Called from ISR context - must be fast and reentrant-safe
+ * @note Implementation is in protocolUtils.c as HAL_FDCAN_RxFifo1Callback
+ */

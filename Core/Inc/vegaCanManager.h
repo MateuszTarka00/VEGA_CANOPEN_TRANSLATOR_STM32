@@ -25,7 +25,7 @@
 /* ============================================================================ */
 
 /** @brief Queue handle for receiving VEGA messages from CAN ISR */
-QueueHandle_t vegaRxQueue;
+extern QueueHandle_t vegaRxQueue;
 
 /* ============================================================================ */
 /* FUNCTION PROTOTYPES                                                        */
@@ -62,6 +62,6 @@ void vegaRxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs);
  * @param hfdcan Pointer to FDCAN handle
  * @param RxFifo1ITs FDCAN RX FIFO1 interrupt flags
  */
-void vegaRxFifo1allback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo1ITs);
+void vegaRxFifo1Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo1ITs);
 
 #endif /* INC_VEGACANMANAGER_H_ */

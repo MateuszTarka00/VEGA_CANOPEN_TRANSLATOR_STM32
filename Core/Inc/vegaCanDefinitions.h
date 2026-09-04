@@ -16,6 +16,15 @@
 
 #include "main.h"
 
+/* Boolean value definitions for compatibility */
+#ifndef FALSE
+#define FALSE 0
+#endif
+
+#ifndef TRUE
+#define TRUE 1
+#endif
+
 /* ============================================================================ */
 /* VEGA INPUT STATE ENUMERATION                                              */
 /* ============================================================================ */
@@ -42,8 +51,14 @@
 /** @brief Base value for first byte in RX messages (floor offset added) */
 #define FIRST_FLOOR_NUMBER_RX   0x80
 
+/** @brief Base CAN ID for RX messages (receives from panel) - global constant */
+#define FIRST_RECEIVE_ID        0x80
+
 /** @brief Base value for first byte in TX messages */
 #define FIRST_FLOOR_NUMBER_TX   0x00
+
+/** @brief Base CAN ID for TX messages - global constant */
+#define FIRST_SEND_ID           0x200
 
 /** @brief Base CAN ID for TX messages */
 #define FIRST_FLOOR_NUMBER_ID   0x200
