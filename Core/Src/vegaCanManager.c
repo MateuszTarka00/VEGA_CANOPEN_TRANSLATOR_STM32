@@ -248,31 +248,3 @@ void vegaTransmitSubTask(void)
 	/* Release mutex after traversal complete */
 	xSemaphoreGive(canOpenNodesListMutex);
 }
-
-/**
- * @brief FDCAN RX FIFO0 interrupt callback handler
- * 
- * Processes received CAN messages from FDCAN RX FIFO0. Called from interrupt
- * context when a message is received. Extracts message data and queues it
- * for processing in task context.
- * 
- * @param hfdcan Pointer to FDCAN handle
- * @param RxFifo0ITs Flags indicating which RX FIFO0 interrupt(s) occurred
- * @return None
- * @note Called from ISR context - must be fast and reentrant-safe
- * @note Implementation is in protocolUtils.c as HAL_FDCAN_RxFifo0Callback
- */
-
-/**
- * @brief FDCAN RX FIFO1 interrupt callback handler
- * 
- * Processes received CAN messages from FDCAN RX FIFO1. Called from interrupt
- * context when a message is received. Extracts message data and queues it
- * for processing in task context.
- * 
- * @param hfdcan Pointer to FDCAN handle
- * @param RxFifo1ITs Flags indicating which RX FIFO1 interrupt(s) occurred
- * @return None
- * @note Called from ISR context - must be fast and reentrant-safe
- * @note Implementation is in protocolUtils.c as HAL_FDCAN_RxFifo1Callback
- */

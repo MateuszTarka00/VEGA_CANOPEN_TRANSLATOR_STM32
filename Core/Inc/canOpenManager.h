@@ -254,32 +254,4 @@ CanOpenNodeObject* getCanOpenObjectsList(void);
  */
 void CANOPEN_SendMasterHeartbeat(void);
 
-/**
- * @brief FDCAN RX FIFO0 interrupt callback handler for CANopen messages
- * 
- * Processes received CAN messages from FDCAN RX FIFO0. Called from interrupt
- * context when a message is received on FDCAN1. Extracts message data and queues it
- * for processing in task context.
- * 
- * @param hfdcan Pointer to FDCAN handle
- * @param RxFifo0ITs Flags indicating which RX FIFO0 interrupt(s) occurred
- * @return None
- * @note Called from ISR context - must be fast and reentrant-safe
- */
-void canOpenRxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs);
-
-/**
- * @brief FDCAN RX FIFO1 interrupt callback handler for CANopen messages
- * 
- * Processes received CAN messages from FDCAN RX FIFO1. Called from interrupt
- * context when a message is received on FDCAN1. Extracts message data and queues it
- * for processing in task context.
- * 
- * @param hfdcan Pointer to FDCAN handle
- * @param RxFifo1ITs Flags indicating which RX FIFO1 interrupt(s) occurred
- * @return None
- * @note Called from ISR context - must be fast and reentrant-safe
- */
-void canOpenRxFifo1Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo1ITs);
-
 #endif /* CAN_OPEN_MANAGER_H */

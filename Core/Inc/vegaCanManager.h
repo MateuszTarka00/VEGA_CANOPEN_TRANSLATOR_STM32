@@ -50,18 +50,4 @@ void processVegaMessage(CAN_Message_t *msg);
  */
 void vegaTransmitSubTask(void);
 
-/**
- * @brief FDCAN RX FIFO0 interrupt callback handler
- * @param hfdcan Pointer to FDCAN handle
- * @param RxFifo0ITs FDCAN RX FIFO0 interrupt flags
- */
-void vegaRxFifo0Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo0ITs);
-
-/**
- * @brief FDCAN RX FIFO1 interrupt callback handler (note: naming typo preserved)
- * @param hfdcan Pointer to FDCAN handle
- * @param RxFifo1ITs FDCAN RX FIFO1 interrupt flags
- */
-void vegaRxFifo1Callback(FDCAN_HandleTypeDef* hfdcan, uint32_t RxFifo1ITs);
-
 #endif /* INC_VEGACANMANAGER_H_ */
