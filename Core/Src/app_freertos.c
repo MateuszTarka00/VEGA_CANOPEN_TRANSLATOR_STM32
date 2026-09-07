@@ -259,7 +259,7 @@ void canOpenMenager(void *argument)
 	  /* Infinite loop */
 	  for(;;)
 	  {
-	    HAL_IWDG_Refresh(&hiwdg);
+//	    HAL_IWDG_Refresh(&hiwdg);
 		ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CANOPEN_TASK_DELAY_MS));
 		
 		TickType_t currentTime = xTaskGetTickCount();
@@ -357,7 +357,7 @@ void canOpenRx(void *argument)
 	CAN_Message_t msg;
 	if(xQueueReceive(canOpenRxQueue, &msg, portMAX_DELAY) == pdTRUE)
 	{
-		HAL_IWDG_Refresh(&hiwdg);
+//		HAL_IWDG_Refresh(&hiwdg);
 		processCanOpenMessage(&msg);
 	}
   }

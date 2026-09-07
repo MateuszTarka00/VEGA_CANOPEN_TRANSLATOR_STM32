@@ -54,7 +54,7 @@
  * @return Number of data bytes (0-8)
  * @note Implemented in protocolUtils.c as shared utility
  */
-#define DLC2LEN(dlc) ((dlc <= 8) ? (dlc) : 8)
+#define DLC2LEN(dlc) ((uint8_t)(((dlc) >> 16) & 0x0FU))
 
 /* ============================================================================ */
 /* CHANGE FLAGS ENUMERATION                                                   */
