@@ -143,7 +143,10 @@ void processVegaMessage(CAN_Message_t *msg)
 		/* UP button pressed or blinking - light UP LED */
 		setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, TRUE);
 		break;
-
+	case NO_BUTTON_THIRD_BYTE_BLINK_RX:
+		/* No buttons light disable - disable both leds */
+		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE, FALSE);
+		setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, FALSE);
 	default:
 		/* Unknown button state - ignore */
 		break;

@@ -92,6 +92,9 @@
 /** @brief Third byte value for UP button RX message (blinking state) */
 #define UP_BUTTON_THIRD_BYTE_BLINK_RX   0x82
 
+/** @brief Third byte value for no button RX message */
+#define NO_BUTTON_THIRD_BYTE_BLINK_RX   0x00
+
 /* ============================================================================ */
 /* VEGA ARROW/DIRECTION INDICATORS                                           */
 /* ============================================================================ */
