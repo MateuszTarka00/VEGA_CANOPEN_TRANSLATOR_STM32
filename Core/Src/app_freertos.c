@@ -270,6 +270,9 @@ void canOpenMenager(void *argument)
 		  CANOPEN_SendMasterHeartbeat();
 		  lastHeartbeatTime = currentTime;
 		}
+
+		/* Flag nodes that have not sent a heartbeat within the timeout window */
+		CANOPEN_CheckHeartbeatTimeouts();
 		
 		/* Process all nodes for NMT state transitions and LOP requests */
 		nodePtr = getCanOpenObjectsList();

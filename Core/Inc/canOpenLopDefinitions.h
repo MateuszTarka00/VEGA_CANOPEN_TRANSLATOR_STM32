@@ -88,17 +88,17 @@
 #define ACTIVATION_BYTE            5
 
 /* ============================================================================ */
-/* OBJECT DICTIONARY ADDRESSES (Little Endian)                              */
+/* OBJECT DICTIONARY ADDRESSES (Big Endian)                                 */
 /* ============================================================================ */
 
 /** @brief OD address for lift mask (0x6001) */
-#define LIFT_MASK                  0x0160
+#define LIFT_MASK                  0x6001
 
 /** @brief OD address for floor number (0x6002) */
-#define FLOOR_NUMBER               0x0260
+#define FLOOR_NUMBER               0x6002
 
 /** @brief OD address for door mask (0x6003) */
-#define DOOR_MASK                  0x0360
+#define DOOR_MASK                  0x6003
 
 /* ============================================================================ */
 /* ENUMERATED TYPES                                                           */

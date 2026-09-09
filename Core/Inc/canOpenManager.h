@@ -44,6 +44,9 @@
 /** @brief Heartbeat message ID*/
 #define CAN_OPEN_HEARTBEAT_MSG_ID  0x700  /**< Heartbeat message ID */
 
+/** @brief Maximum time without a heartbeat before a node is flagged as lost */
+#define CAN_OPEN_HEARTBEAT_TIMEOUT_MS  10000
+
 /* ============================================================================ */
 /* FDCAN UTILITY FUNCTION DECLARATIONS                                        */
 /* ============================================================================ */
@@ -174,6 +177,11 @@ typedef struct
     bool liftMapReceived;            /**< Flag: LIFT_MASK SDO response received */
     bool doorMapReceived;            /**< Flag: DOOR_MASK SDO response received */
 
+    /* Heartbeat monitoring */
+    bool heartbeatReceived;          /**< At least one heartbeat received from this node */
+    TickType_t lastHeartbeatTime;    /**< Timestamp of last heartbeat message (ticks) */
+    bool heartbeatTimeoutError;      /**< Set when no heartbeat received within CAN_OPEN_HEARTBEAT_TIMEOUT_MS */
+
 } CanOpenNodeHandler;
 
 /* ============================================================================ */
@@ -235,6 +243,11 @@ void CANOPEN_InitRTOS(void);
  * @param msg Pointer to received CAN message
  */
 void processCanOpenMessage(CAN_Message_t *msg);
+
+/**
+ * @brief Check all managed nodes for heartbeat timeout and flag lost nodes
+ */
+void CANOPEN_CheckHeartbeatTimeouts(void);
 
 /**
  * @brief Get pointer to head of CANopen nodes linked list

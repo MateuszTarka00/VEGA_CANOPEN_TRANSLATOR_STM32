@@ -104,6 +104,9 @@ static CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.lopRequestAttempts = 0;
 	node->canOpenNodeHandler.liftMapReceived = FALSE;
 	node->canOpenNodeHandler.doorMapReceived = FALSE;
+	node->canOpenNodeHandler.heartbeatReceived = FALSE;
+	node->canOpenNodeHandler.lastHeartbeatTime = 0;
+	node->canOpenNodeHandler.heartbeatTimeoutError = FALSE;
 	node->nextObject = NULL;
 
 	return node;
@@ -196,7 +199,8 @@ void processCanOpenMessage(CAN_Message_t *msg)
 	xSemaphoreGive(canOpenNodesListMutex);
 
 	/* Create new node if not found in list */
-	if (current == NULL) {
+	bool nodeCreated = (current == NULL);
+	if (nodeCreated) {
 		appendNode(canOpenId);
 		
 		/* Retrieve newly created node (with mutex protection) */
@@ -219,16 +223,26 @@ void processCanOpenMessage(CAN_Message_t *msg)
 		}
 	}
 
-	/* Request device configuration from the newly found/created node */
+	/* Request device configuration only for a newly discovered node */
 	/* NOTE: LOP request will be sent by CanOpenMenagerT after NMT handshake complete */
-	current->canOpenNodeHandler.lopRequestNeeded = TRUE;
+	if (nodeCreated) {
+		current->canOpenNodeHandler.lopRequestNeeded = TRUE;
+	}
 
 	/* Process heartbeat and NMT state messages (COB-ID 0x700-0x7FF) */
 	if (msg->id >= CAN_OPEN_HEARTBEAT_MSG_ID && msg->id <= 0x77F) {
 		/* Extract NMT state from last byte of heartbeat message */
 		current->canOpenNodeHandler.nmtState = msg->data[msg->len - 1];
 
+		/* Record heartbeat reception for timeout monitoring */
+		current->canOpenNodeHandler.heartbeatReceived = TRUE;
+		current->canOpenNodeHandler.lastHeartbeatTime = xTaskGetTickCount();
+		current->canOpenNodeHandler.heartbeatTimeoutError = FALSE;
+
 		/* NOTE: NMT start command will be sent by CanOpenMenagerT when PRE_OPERATIONAL detected */
+	} else {
+		/* Route all other message types (button presses, SDO responses) to LOP layer */
+		decomposeCanOpenMessage(&current->canOpenNodeHandler, msg);
 	}
 }
 
@@ -244,6 +258,35 @@ void processCanOpenMessage(CAN_Message_t *msg)
 CanOpenNodeObject* getCanOpenObjectsList(void)
 {
 	return canOpenNodesList;
+}
+
+/**
+ * @brief Check all managed nodes for heartbeat timeout and flag lost nodes
+ * 
+ * Iterates the node list and sets heartbeatTimeoutError when a node that has
+ * previously received a heartbeat has not sent one within CAN_OPEN_HEARTBEAT_TIMEOUT_MS.
+ * 
+ * @return None
+ */
+void CANOPEN_CheckHeartbeatTimeouts(void)
+{
+	TickType_t currentTime = xTaskGetTickCount();
+
+	if (xSemaphoreTake(canOpenNodesListMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+		return; /* Timeout acquiring mutex */
+	}
+
+	CanOpenNodeObject *current = canOpenNodesList;
+	while (current != NULL) {
+		CanOpenNodeHandler *node = &current->canOpenNodeHandler;
+		if (node->heartbeatReceived &&
+			(currentTime - node->lastHeartbeatTime) >= pdMS_TO_TICKS(CAN_OPEN_HEARTBEAT_TIMEOUT_MS)) {
+			node->heartbeatTimeoutError = TRUE;
+		}
+		current = current->nextObject;
+	}
+
+	xSemaphoreGive(canOpenNodesListMutex);
 }
 
 /**
