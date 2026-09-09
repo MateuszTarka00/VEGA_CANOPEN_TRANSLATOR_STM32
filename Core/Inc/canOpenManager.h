@@ -156,7 +156,8 @@ typedef struct
     uint8_t liftMap;                 /**< Bitmask of available lifts */
     uint8_t doorMap;                 /**< Bitmask of door configurations */
 
-    uint32_t vegaTicks;              /**< Timestamp of last VEGA activity (ms) */
+    uint32_t vegaTicks;              /**< Timestamp of last VEGA RX message (ms) - used for connected/disconnected check */
+    uint32_t lastVegaTxTicks;         /**< Timestamp of last VEGA TX message (ms) - used for 100/1000ms send scheduling */
     bool vegaConnected;              /**< Connected to VEGA protocol network */
 
     bool upButtonState;              /**< UP button currently pressed */

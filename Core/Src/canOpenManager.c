@@ -85,6 +85,7 @@ static CanOpenNodeObject* createNode(uint32_t id)
 
 	/* Initialize all node fields to default/safe values */
 	node->canOpenNodeHandler.vegaTicks = 0;
+	node->canOpenNodeHandler.lastVegaTxTicks = 0;
 	node->canOpenNodeHandler.floorNumber = ID_TO_FLOOR_NUMBER(id);
 	node->canOpenNodeHandler.canOpenID = id;
 	node->canOpenNodeHandler.vegaConnected = FALSE;

@@ -196,8 +196,8 @@ void vegaTransmitSubTask(void)
 			canOpenObjects->canOpenNodeHandler.vegaConnected = FALSE;
 		}
 
-		/* Check if it's time to send next message */
-		if ((ticksNow - canOpenObjects->canOpenNodeHandler.vegaTicks) < txInterval) {
+		/* Check if it's time to send next message (based on last TX, not last RX) */
+		if ((ticksNow - canOpenObjects->canOpenNodeHandler.lastVegaTxTicks) < txInterval) {
 			canOpenObjects = canOpenObjects->nextObject;
 			continue; /* Not yet time - skip this node */
 		}
@@ -246,8 +246,8 @@ void vegaTransmitSubTask(void)
 		/* Transmit VEGA message */
 		protocolSend(sendID, message, CAN_MESSAGE_SIZE, PROTOCOL_VEGA);  /* VEGA protocol */
 
-		/* Update last transmission timestamp */
-		canOpenObjects->canOpenNodeHandler.vegaTicks = ticksNow;
+		/* Update last transmission timestamp (separate from RX timestamp used for connection detection) */
+		canOpenObjects->canOpenNodeHandler.lastVegaTxTicks = ticksNow;
 
 		/* Move to next node in linked list */
 		canOpenObjects = canOpenObjects->nextObject;
