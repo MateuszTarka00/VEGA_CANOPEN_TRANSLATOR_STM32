@@ -123,6 +123,11 @@ void processVegaMessage(CAN_Message_t *msg)
 	if (nodePtr == NULL) {
 		return; /* Cannot update non-existent node */
 	}
+	//set vega connected
+	nodePtr->canOpenNodeHandler.vegaConnected = TRUE;
+
+	//save last time vega master send message to LOP
+	nodePtr->canOpenNodeHandler.vegaTicks = HAL_GetTick();
 
 	/* Parse LED state from third byte (byte index 2) and update using shared utility */
 	switch (msg->data[2])
@@ -166,7 +171,7 @@ void vegaTransmitSubTask(void)
 {
 	CanOpenNodeObject* canOpenObjects = getCanOpenObjectsList();
 	TickType_t ticksNow = HAL_GetTick();
-	uint8_t sendID = 0;
+	uint16_t sendID = 0;
 	uint8_t checksum_idx = 0;
 
 	/* Validate node list exists */
@@ -184,6 +189,12 @@ void vegaTransmitSubTask(void)
 		/* Calculate transmission interval based on connection status */
 		uint32_t txInterval = canOpenObjects->canOpenNodeHandler.vegaConnected ?
 		                      TIME_SEND_CONNECTED : TIME_SEND_NOT_CONNECTED;
+
+		//check if vega master has disconnected to current LOP
+		if(ticksNow - canOpenObjects->canOpenNodeHandler.vegaTicks > CONNECTED_TO_MASTER_TIMEOUT)
+		{
+			canOpenObjects->canOpenNodeHandler.vegaConnected = FALSE;
+		}
 
 		/* Check if it's time to send next message */
 		if ((ticksNow - canOpenObjects->canOpenNodeHandler.vegaTicks) < txInterval) {

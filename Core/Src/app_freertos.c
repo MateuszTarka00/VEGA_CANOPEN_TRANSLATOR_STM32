@@ -62,14 +62,14 @@
 osThreadId_t TrancieverTHandle;
 const osThreadAttr_t TrancieverT_attributes = {
   .name = "TrancieverT",
-  .priority = (osPriority_t) osPriorityNormal3,
+  .priority = (osPriority_t) osPriorityAboveNormal7,
   .stack_size = 512 * 4
 };
 /* Definitions for CanOpenMenagerT */
 osThreadId_t CanOpenMenagerTHandle;
 const osThreadAttr_t CanOpenMenagerT_attributes = {
   .name = "CanOpenMenagerT",
-  .priority = (osPriority_t) osPriorityNormal4,
+  .priority = (osPriority_t) osPriorityAboveNormal6,
   .stack_size = 1024 * 4
 };
 /* Definitions for VegaRxT */

@@ -379,7 +379,7 @@ uint8_t extractFloorFromVegaId(uint32_t vegaMessageId)
         return 0xFF;  /* Invalid - return marker value */
     }
 
-    return (uint8_t)(vegaMessageId - FIRST_RECEIVE_ID);
+    return (uint8_t)(vegaMessageId - FIRST_RECEIVE_ID + 1); //canOpen first = 1, vega first = 0
 }
 
 /* ============================================================================
