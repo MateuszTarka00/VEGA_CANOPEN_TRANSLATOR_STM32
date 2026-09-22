@@ -92,6 +92,12 @@
 /** @brief Third byte value for UP button RX message (blinking state) */
 #define UP_BUTTON_THIRD_BYTE_BLINK_RX   0x82
 
+/** @brief Third byte value for DOWN button RX message (blinking state) */
+#define BOTH_BUTTON_THIRD_BYTE_CONST_RX 0x03
+
+/** @brief Third byte value for both buttons RX message (blinking state) */
+#define BOTH_BUTTON_THIRD_BYTE_BLINK_RX 0xC3
+
 /** @brief Third byte value for no button RX message */
 #define NO_BUTTON_THIRD_BYTE_BLINK_RX   0x00
 

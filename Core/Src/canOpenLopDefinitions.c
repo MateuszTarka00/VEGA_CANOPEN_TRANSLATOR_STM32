@@ -202,6 +202,44 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
 		node->changeFlags &= (~DOWN_LED_STATE);
 	}
 
+	/* Handle UP button LED state change */
+	if (node->changeFlags & ARRIVING_DOWN) {
+		LedIndicatorMessageTx msg;
+
+		/* Compose LED indicator message */
+		msg.function = LOP_LIFT_ARRIVING_ID;
+		msg.doorMap = node->doorMap;
+		msg.floorNumber = node->floorNumber;
+		msg.liftMap = node->liftMap;
+		msg.ledIndicator = DOWN_BUTTON;
+		msg.onOff = node->downArrivingSound;
+
+		/* Transmit message */
+		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+
+		/* Clear change flag after transmission */
+		node->changeFlags &= (~ARRIVING_DOWN);
+	}
+
+	/* Handle DOWN button LED state change */
+	if (node->changeFlags & ARRIVING_UP) {
+		LedIndicatorMessageTx msg;
+
+		/* Compose LED indicator message */
+		msg.function = LOP_LIFT_ARRIVING_ID;
+		msg.doorMap = node->doorMap;
+		msg.floorNumber = node->floorNumber;
+		msg.liftMap = node->liftMap;
+		msg.ledIndicator = UP_BUTTON;
+		msg.onOff = node->upArrivingSound; /* BUG FIX: Was using upLedState, should use downLedState */
+
+		/* Transmit message */
+		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+
+		/* Clear change flag after transmission */
+		node->changeFlags &= (~ARRIVING_UP);
+	}
+
 	/* Handle displayed floor indicator change */
 	if (node->changeFlags & DISPLAYED_FLOOR) {
 		FloorDisplayMessageTx msg;

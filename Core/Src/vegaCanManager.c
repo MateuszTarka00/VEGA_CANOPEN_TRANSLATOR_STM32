@@ -143,10 +143,14 @@ void processVegaMessage(CAN_Message_t *msg)
 		/* UP button pressed or blinking - light UP LED */
 		setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, TRUE);
 		break;
+	case BOTH_BUTTON_THIRD_BYTE_CONST_RX:
+	case BOTH_BUTTON_THIRD_BYTE_BLINK_RX:
+		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, TRUE);
+		break;
+
 	case NO_BUTTON_THIRD_BYTE_BLINK_RX:
 		/* No buttons light disable - disable both leds */
-		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE, FALSE);
-		setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, FALSE);
+		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, FALSE);
 	default:
 		/* Unknown button state - ignore */
 		break;
@@ -212,6 +216,12 @@ void vegaTransmitSubTask(void)
 		if (sendID - FIRST_SEND_ID >= 20) {
 			canOpenObjects = canOpenObjects->nextObject;
 			continue; /* Floor number out of range - skip */
+		}
+
+		/* Check if node is alive */
+		if(canOpenObjects->canOpenNodeHandler.heartbeatTimeoutError){
+			canOpenObjects = canOpenObjects->nextObject;
+			continue; /* Node is not alive - skip */
 		}
 
 		checksum_idx = sendID - FIRST_SEND_ID;

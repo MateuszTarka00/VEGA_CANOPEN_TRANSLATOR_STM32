@@ -56,6 +56,9 @@
 /** @brief Arrow display function ID */
 #define LOP_LIFT_DISPLAY_ARROW_ID  0x42
 
+/** @brief Arriving sound function ID */
+#define LOP_LIFT_ARRIVING_ID	   0x44
+
 /** @brief SDO read transfer function ID (TX) */
 #define LOP_SDO_READ_TX            0x40
 

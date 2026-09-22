@@ -287,25 +287,30 @@ bool setLedState(
         return false;
     }
 
+    /* Handle both leds */
+    if(ledType == (DOWN_LED_STATE | UP_LED_STATE))
+    {
+        node->downLedState = state;
+        node->upLedState = state;
+        node->changeFlags |= DOWN_LED_STATE | UP_LED_STATE;
+        return true;
+    }
+
     /* Handle DOWN LED */
     if (ledType == DOWN_LED_STATE) {
         node->downLedState = state;
-        if (state) {
-            node->upLedState = FALSE;  /* Clear UP LED when DOWN LED enabled */
-        }
+        node->upLedState = FALSE;  /* Clear UP LED when DOWN LED enabled */
         /* Set changeFlags to trigger transmission */
-        node->changeFlags |= DOWN_LED_STATE;
+        node->changeFlags |= DOWN_LED_STATE | UP_LED_STATE;
         return true;
     }
 
     /* Handle UP LED */
     if (ledType == UP_LED_STATE) {
         node->upLedState = state;
-        if (state) {
-            node->downLedState = FALSE;  /* Clear DOWN LED when UP LED enabled */
-        }
+        node->downLedState = FALSE;
         /* Set changeFlags to trigger transmission */
-        node->changeFlags |= UP_LED_STATE;
+        node->changeFlags |= DOWN_LED_STATE | UP_LED_STATE;
         return true;
     }
 

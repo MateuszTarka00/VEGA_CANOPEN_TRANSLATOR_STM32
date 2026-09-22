@@ -45,7 +45,7 @@
 #define CAN_OPEN_HEARTBEAT_MSG_ID  0x700  /**< Heartbeat message ID */
 
 /** @brief Maximum time without a heartbeat before a node is flagged as lost */
-#define CAN_OPEN_HEARTBEAT_TIMEOUT_MS  10000
+#define CAN_OPEN_HEARTBEAT_TIMEOUT_MS  3000
 
 /* ============================================================================ */
 /* FDCAN UTILITY FUNCTION DECLARATIONS                                        */
@@ -76,6 +76,8 @@ typedef enum
     DOWN_LED_STATE = 1 << 1,       /**< DOWN button LED indicator changed */
     DISPLAYED_FLOOR = 1 << 2,      /**< Floor display value changed */
     DISPLAYED_ARROW = 1 << 3,      /**< Arrow indicator (up/down) changed */
+    ARRIVING_DOWN = 1 << 4,      /**< Floor display value changed */
+    ARRIVING_UP = 1 << 5,      /**< Arrow indicator (up/down) changed */
 
 } ChangeFlags;
 
@@ -165,6 +167,9 @@ typedef struct
 
     bool upLedState;                 /**< UP button LED indicator state */
     bool downLedState;               /**< DOWN button LED indicator state */
+
+    bool upArrivingSound;            /**< UP arriving sound Active */
+    bool downArrivingSound;          /**< DOWN arriving sound Active */
 
     uint8_t displayedFloor;          /**< Current floor to display */
     uint8_t displayedArrow;          /**< Arrow indicator (0x00/0x10/0x20/0x30) */

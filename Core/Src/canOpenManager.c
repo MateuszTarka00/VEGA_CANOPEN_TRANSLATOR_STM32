@@ -108,6 +108,8 @@ static CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.heartbeatReceived = FALSE;
 	node->canOpenNodeHandler.lastHeartbeatTime = 0;
 	node->canOpenNodeHandler.heartbeatTimeoutError = FALSE;
+	node->canOpenNodeHandler.upArrivingSound = FALSE;
+	node->canOpenNodeHandler.downArrivingSound = FALSE;
 	node->nextObject = NULL;
 
 	return node;
