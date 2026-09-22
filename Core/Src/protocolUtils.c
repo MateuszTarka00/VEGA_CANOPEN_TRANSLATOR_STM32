@@ -245,21 +245,23 @@ bool setButtonState(
         return false;
     }
 
+    /* Handle both buttons */
+    if(buttonType == (UP_BUTTON | DOWN_BUTTON) )
+    {
+        node->upButtonState = isPressed;
+        node->downButtonState = isPressed;
+        return true;
+    }
+
     /* Handle UP button */
     if (buttonType == UP_BUTTON) {
         node->upButtonState = isPressed;
-        if (isPressed) {
-            node->downButtonState = FALSE;  /* Clear DOWN button when UP pressed */
-        }
         return true;
     }
 
     /* Handle DOWN button */
     if (buttonType == DOWN_BUTTON) {
         node->downButtonState = isPressed;
-        if (isPressed) {
-            node->upButtonState = FALSE;  /* Clear UP button when DOWN pressed */
-        }
         return true;
     }
 
