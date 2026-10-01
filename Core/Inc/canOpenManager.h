@@ -78,6 +78,7 @@ typedef enum
     DISPLAYED_ARROW = 1 << 3,      /**< Arrow indicator (up/down) changed */
     ARRIVING_DOWN = 1 << 4,      /**< Floor display value changed */
     ARRIVING_UP = 1 << 5,      /**< Arrow indicator (up/down) changed */
+	SPECIAL_INFORMATION = 1 << 6,
 
 } ChangeFlags;
 
@@ -170,6 +171,7 @@ typedef struct
 
     bool upArrivingSound;            /**< UP arriving sound Active */
     bool downArrivingSound;          /**< DOWN arriving sound Active */
+    uint8_t specialInformation;
 
     uint8_t displayedFloor;          /**< Current floor to display */
     uint8_t displayedArrow;          /**< Arrow indicator (0x00/0x10/0x20/0x30) */

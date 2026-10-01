@@ -54,6 +54,8 @@
 /** @brief Base CAN ID for RX messages (receives from panel) - global constant */
 #define FIRST_RECEIVE_ID        0x80
 
+#define VEGA_MASTER_LOP_ID   	0x00
+
 /** @brief Base value for first byte in TX messages */
 #define FIRST_FLOOR_NUMBER_TX   0x00
 
@@ -62,6 +64,14 @@
 
 /** @brief Base CAN ID for TX messages */
 #define FIRST_FLOOR_NUMBER_ID   0x200
+
+//special informations
+
+#define VEGA_SPECIAL_INFORMATION_ID  0x44
+
+#define VEGA_INSPECTION_ID			0x4E
+
+#define VEGA_OUT_OF_SERVICE_ID		0x53
 
 /* ============================================================================ */
 /* VEGA TX MESSAGE BUTTON STATE BYTE VALUES                                  */

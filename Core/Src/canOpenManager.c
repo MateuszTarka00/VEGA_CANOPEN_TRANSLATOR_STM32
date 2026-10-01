@@ -96,7 +96,7 @@ static CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.nmtState = CO_NMT_INITIALIZING;
 	node->canOpenNodeHandler.changeFlags = 0;
 	node->canOpenNodeHandler.displayedArrow = 0;
-	node->canOpenNodeHandler.displayedFloor = 0;
+	node->canOpenNodeHandler.displayedFloor = 0xFF;
 	node->canOpenNodeHandler.doorMap = 0;
 	node->canOpenNodeHandler.liftMap = 0;
 	/* LOP request tracking - will be handled by CanOpenMenagerT after NMT handshake */
@@ -110,6 +110,7 @@ static CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.heartbeatTimeoutError = FALSE;
 	node->canOpenNodeHandler.upArrivingSound = FALSE;
 	node->canOpenNodeHandler.downArrivingSound = FALSE;
+	node ->canOpenNodeHandler.specialInformation = FALSE;
 	node->nextObject = NULL;
 
 	return node;

@@ -159,129 +159,148 @@ void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
  */
 void processNodeToSendMsg(CanOpenNodeHandler *node)
 {
-	/* Validate input parameter */
-	if (node == NULL) {
-		return; /* Invalid node pointer */
-	}
+    /* Validate input parameter */
+    if (node == NULL) {
+        return; /* Invalid node pointer */
+    }
 
-	/* Handle UP button LED state change */
-	if (node->changeFlags & UP_LED_STATE) {
-		LedIndicatorMessageTx msg;
+    /* Handle UP button LED state change */
+    if (node->changeFlags & UP_LED_STATE) {
+        LedIndicatorMessageTx msg;
 
-		/* Compose LED indicator message */
-		msg.function = LOP_LIFT_CALL_FUNCTION_ID;
-		msg.doorMap = node->doorMap;
-		msg.floorNumber = node->floorNumber;
-		msg.liftMap = node->liftMap;
-		msg.ledIndicator = UP_BUTTON;
-		msg.onOff = node->upLedState;
+        /* Compose LED indicator message */
+        msg.function = LOP_LIFT_CALL_FUNCTION_ID;
+        msg.doorMap = node->doorMap;
+        msg.floorNumber = node->floorNumber;
+        msg.liftMap = node->liftMap;
+        msg.ledIndicator = UP_BUTTON;
+        msg.onOff = node->upLedState;
 
-		/* Transmit message */
-		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+        /* Transmit message */
+        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
-		/* Clear change flag after transmission */
-		node->changeFlags &= (~UP_LED_STATE);
-	}
+        /* Clear change flag after transmission */
+        node->changeFlags &= (~UP_LED_STATE);
+    }
 
-	/* Handle DOWN button LED state change */
-	if (node->changeFlags & DOWN_LED_STATE) {
-		LedIndicatorMessageTx msg;
+    /* Handle DOWN button LED state change */
+    if (node->changeFlags & DOWN_LED_STATE) {
+        LedIndicatorMessageTx msg;
 
-		/* Compose LED indicator message */
-		msg.function = LOP_LIFT_CALL_FUNCTION_ID;
-		msg.doorMap = node->doorMap;
-		msg.floorNumber = node->floorNumber;
-		msg.liftMap = node->liftMap;
-		msg.ledIndicator = DOWN_BUTTON;
-		msg.onOff = node->downLedState; /* BUG FIX: Was using upLedState, should use downLedState */
+        /* Compose LED indicator message */
+        msg.function = LOP_LIFT_CALL_FUNCTION_ID;
+        msg.doorMap = node->doorMap;
+        msg.floorNumber = node->floorNumber;
+        msg.liftMap = node->liftMap;
+        msg.ledIndicator = DOWN_BUTTON;
+        msg.onOff = node->downLedState;
 
-		/* Transmit message */
-		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+        /* Transmit message */
+        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
-		/* Clear change flag after transmission */
-		node->changeFlags &= (~DOWN_LED_STATE);
-	}
+        /* Clear change flag after transmission */
+        node->changeFlags &= (~DOWN_LED_STATE);
+    }
 
-	/* Handle UP button LED state change */
-	if (node->changeFlags & ARRIVING_DOWN) {
-		LedIndicatorMessageTx msg;
+    /* Handle DOWN arrival sound state change */
+    if (node->changeFlags & ARRIVING_DOWN) {
+        LedIndicatorMessageTx msg;
 
-		/* Compose LED indicator message */
-		msg.function = LOP_LIFT_ARRIVING_ID;
-		msg.doorMap = node->doorMap;
-		msg.floorNumber = node->floorNumber;
-		msg.liftMap = node->liftMap;
-		msg.ledIndicator = DOWN_BUTTON;
-		msg.onOff = node->downArrivingSound;
+        /* Compose arrival sound message */
+        msg.function = LOP_LIFT_ARRIVING_ID;
+        msg.doorMap = node->doorMap;
+        msg.floorNumber = node->floorNumber;
+        msg.liftMap = node->liftMap;
+        msg.ledIndicator = DOWN_BUTTON;
+        msg.onOff = node->downArrivingSound;
 
-		/* Transmit message */
-		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+        /* Transmit message */
+        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
-		/* Clear change flag after transmission */
-		node->changeFlags &= (~ARRIVING_DOWN);
-	}
+        /* Clear change flag after transmission */
+        node->changeFlags &= (~ARRIVING_DOWN);
+    }
 
-	/* Handle DOWN button LED state change */
-	if (node->changeFlags & ARRIVING_UP) {
-		LedIndicatorMessageTx msg;
+    /* Handle UP arrival sound state change */
+    if (node->changeFlags & ARRIVING_UP) {
+        LedIndicatorMessageTx msg;
 
-		/* Compose LED indicator message */
-		msg.function = LOP_LIFT_ARRIVING_ID;
-		msg.doorMap = node->doorMap;
-		msg.floorNumber = node->floorNumber;
-		msg.liftMap = node->liftMap;
-		msg.ledIndicator = UP_BUTTON;
-		msg.onOff = node->upArrivingSound; /* BUG FIX: Was using upLedState, should use downLedState */
+        /* Compose arrival sound message */
+        msg.function = LOP_LIFT_ARRIVING_ID;
+        msg.doorMap = node->doorMap;
+        msg.floorNumber = node->floorNumber;
+        msg.liftMap = node->liftMap;
+        msg.ledIndicator = UP_BUTTON;
+        msg.onOff = node->upArrivingSound;
 
-		/* Transmit message */
-		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+        /* Transmit message */
+        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
-		/* Clear change flag after transmission */
-		node->changeFlags &= (~ARRIVING_UP);
-	}
+        /* Clear change flag after transmission */
+        node->changeFlags &= (~ARRIVING_UP);
+    }
 
-	/* Handle displayed floor indicator change */
-	if (node->changeFlags & DISPLAYED_FLOOR) {
-		FloorDisplayMessageTx msg;
+    /* Handle special information change */
+    if (node->changeFlags & SPECIAL_INFORMATION) {
+        SpecialIndicationMessageTx msg;
 
-		/* Compose floor display message */
-		msg.function = LOP_LIFT_DISPLAY_FLOOR_ID;
-		msg.doorMap = node->doorMap;
-		msg.floorNumber = node->floorNumber;
-		msg.liftMap = node->liftMap;
-		msg.floorIndicator = node->displayedFloor;
-		msg.onOff = TRUE; /* Always enable floor display */
+        /* Compose special indication message */
+        msg.function = LOP_SPECIAL_INDICATION_ID;
+        msg.doorMap = node->doorMap;
+        msg.floorNumber = node->floorNumber;
+        msg.liftMap = node->liftMap;
+        msg.specialIndicator = node->specialInformation;
+        msg.onOff = 0x81;
 
-		/* Transmit message */
-		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+        /* Transmit message */
+        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
-		/* Clear change flag after transmission */
-		node->changeFlags &= (~DISPLAYED_FLOOR);
-	}
+        /* Clear change flag after transmission */
+        node->changeFlags &= (~SPECIAL_INFORMATION);
+    }
 
-	/* Handle displayed arrow indicator change */
-	if (node->changeFlags & DISPLAYED_ARROW) {
-		ArrowDisplayMessageTx msg;
+    /* Handle displayed floor indicator change */
+    if (node->changeFlags & DISPLAYED_FLOOR) {
+        FloorDisplayMessageTx msg;
 
-		/* First, turn off all arrow indicators (BOTH_ARROWS = 0x30) */
-		msg.function = LOP_LIFT_DISPLAY_ARROW_ID;
-		msg.doorMap = node->doorMap;
-		msg.floorNumber = node->floorNumber;
-		msg.liftMap = node->liftMap;
-		msg.arrowIndicator = BOTH_ARROWS; /* Clear all arrows */
-		msg.onOff = FALSE; /* Disable all arrows */
+        /* Compose floor display message */
+        msg.function = LOP_LIFT_DISPLAY_FLOOR_ID;
+        msg.doorMap = node->doorMap;
+        msg.floorNumber = node->floorNumber;
+        msg.liftMap = node->liftMap;
+        msg.floorIndicator = node->displayedFloor;
+        msg.onOff = TRUE; /* Always enable floor display */
 
-		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+        /* Transmit message */
+        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
 
-		/* Then, enable only the desired arrow indicator */
-		msg.arrowIndicator = node->displayedArrow;
-		msg.onOff = TRUE; /* Enable selected arrow */
+        /* Clear change flag after transmission */
+        node->changeFlags &= (~DISPLAYED_FLOOR);
+    }
 
-		protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+    /* Handle displayed arrow indicator change */
+    if (node->changeFlags & DISPLAYED_ARROW) {
+        ArrowDisplayMessageTx msg;
 
-		/* Clear change flag after transmission */
-		node->changeFlags &= (~DISPLAYED_ARROW);
-	}
+        /* First, turn off all arrow indicators */
+        msg.function = LOP_LIFT_DISPLAY_ARROW_ID;
+        msg.doorMap = node->doorMap;
+        msg.floorNumber = node->floorNumber;
+        msg.liftMap = node->liftMap;
+        msg.arrowIndicator = BOTH_ARROWS;
+        msg.onOff = FALSE;
+
+        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+
+        /* Then, enable only the desired arrow indicator */
+        msg.arrowIndicator = node->displayedArrow;
+        msg.onOff = TRUE;
+
+        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+
+        /* Clear change flag after transmission */
+        node->changeFlags &= (~DISPLAYED_ARROW);
+    }
 }
 
 /**

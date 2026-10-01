@@ -187,8 +187,8 @@ bool validateMessage(
     const CAN_Message_t *msg,
     uint8_t minLen,
     uint8_t maxLen,
-    uint32_t minId,
-    uint32_t maxId
+    uint32_t minFloorID,
+    uint32_t maxFloorID
 )
 {
     /* Validate message pointer */
@@ -202,7 +202,7 @@ bool validateMessage(
     }
 
     /* Validate message ID is within range */
-    if (msg->id < minId || msg->id >= maxId) {
+    if (msg->data[0] < minFloorID || msg->data[0] >= maxFloorID) {
         return false;
     }
 

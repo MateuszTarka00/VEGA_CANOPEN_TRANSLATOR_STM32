@@ -59,6 +59,9 @@
 /** @brief Arriving sound function ID */
 #define LOP_LIFT_ARRIVING_ID	   0x44
 
+/** @brief Special indication function ID */
+#define LOP_SPECIAL_INDICATION_ID   0x43
+
 /** @brief SDO read transfer function ID (TX) */
 #define LOP_SDO_READ_TX            0x40
 
@@ -106,6 +109,33 @@
 /* ============================================================================ */
 /* ENUMERATED TYPES                                                           */
 /* ============================================================================ */
+
+typedef enum
+{
+    CANOPEN_SPECIAL_INDICATION_NO_SERVICE        = 0x01,
+    CANOPEN_SPECIAL_INDICATION_MAINTENANCE       = 0x02,
+    CANOPEN_SPECIAL_INDICATION_FIRE_ALARM        = 0x03,
+    CANOPEN_SPECIAL_INDICATION_FIRE_RECALL       = 0x04,
+    CANOPEN_SPECIAL_INDICATION_ATTENDANT_SERVICE = 0x05,
+    CANOPEN_SPECIAL_INDICATION_SPECIAL_SERVICE   = 0x06,
+    CANOPEN_SPECIAL_INDICATION_OVERLOAD          = 0x07,
+    CANOPEN_SPECIAL_INDICATION_GUEST_CALL        = 0x08,
+    CANOPEN_SPECIAL_INDICATION_HALL_CALL_DISABLE = 0x09,
+    CANOPEN_SPECIAL_INDICATION_VIP_TRANSPORT     = 0x0A,
+    CANOPEN_SPECIAL_INDICATION_BED_TRANSPORT     = 0x0B,
+    CANOPEN_SPECIAL_INDICATION_HELP_IS_COMING    = 0x0C,
+    CANOPEN_SPECIAL_INDICATION_CAR_EMPTY         = 0x0D,
+    CANOPEN_SPECIAL_INDICATION_CAR_OCCUPIED      = 0x0E,
+    CANOPEN_SPECIAL_INDICATION_CUSTOM_MSG_1      = 0x0F,
+    CANOPEN_SPECIAL_INDICATION_CUSTOM_MSG_2      = 0x10,
+    CANOPEN_SPECIAL_INDICATION_CUSTOM_MSG_3      = 0x11,
+    CANOPEN_SPECIAL_INDICATION_INITIALISING      = 0x12,
+    CANOPEN_SPECIAL_INDICATION_PREOPERATIONAL    = 0x13,
+    CANOPEN_SPECIAL_INDICATION_OPERATIONAL       = 0x14,
+    CANOPEN_SPECIAL_INDICATION_STOPPED           = 0x15,
+    CANOPEN_SPECIAL_INDICATION_COMM_ERROR        = 0x16
+
+} CanOpenSpecialIndication_t;
 
 /**
  * @brief Lift call button states
@@ -242,6 +272,28 @@ typedef union
     uint8_t data[6];               /**< Raw message data array */
 
 } CarCallMessageTx;
+
+/**
+ * @brief Special indication message transmission format
+ *
+ * Transmits special elevator status indications such as maintenance,
+ * no service, fire alarm, overload, etc.
+ */
+typedef union
+{
+    struct
+    {
+        uint8_t function;          /**< LOP_SPECIAL_INDICATION_ID */
+        uint8_t specialIndicator; /**< Special indication (CanOpenSpecialIndication_t) */
+        uint8_t liftMap;           /**< Available lifts bitmask */
+        uint8_t floorNumber;       /**< Current floor in building */
+        uint8_t doorMap;           /**< Door configuration bitmask */
+        uint8_t onOff;             /**< Indication on/off state */
+    };
+
+    uint8_t data[6];               /**< Raw message data array */
+
+} SpecialIndicationMessageTx;
 
 /* ============================================================================ */
 /* MESSAGE UNION DEFINITIONS - SDO FORMAT (8 bytes)                           */

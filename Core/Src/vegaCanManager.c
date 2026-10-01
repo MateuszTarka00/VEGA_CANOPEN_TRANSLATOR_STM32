@@ -23,6 +23,7 @@
 #include "protocolUtils.h"
 #include "semphr.h"
 #include "fdcan.h"
+#include "canOpenLopDefinitions.h"
 
 /* Extern declaration of the mutex from canOpenManager for thread-safe list access */
 extern SemaphoreHandle_t canOpenNodesListMutex;
@@ -105,55 +106,126 @@ void VEGA_InitRTOS(void)
 void processVegaMessage(CAN_Message_t *msg)
 {
 	/* Validate message using shared utility (checks null, length, ID range) */
-	if (!validateMessage(msg, 3, 4, FIRST_RECEIVE_ID, FIRST_RECEIVE_ID + 20)) {
-		return; /* Message failed validation */
-	}
+//	if (!validateMessage(msg, 3, 7, FIRST_RECEIVE_ID, FIRST_RECEIVE_ID + 20)) {
+//		return; /* Message failed validation */
+//	}
 
-	/* Extract floor number from VEGA RX message ID using shared utility */
-	uint8_t floorNumber = extractFloorFromVegaId(msg->id);
-	if (floorNumber == 0xFF) {
-		return; /* Invalid floor number (already validated by validateMessage, but defensive) */
-	}
-
-	/* Convert floor to CANopen node ID (20 + floor number) */
-	uint32_t canOpenNodeId = floorToCanOpenId(floorNumber);
-
-	/* Find corresponding CANopen node in linked list using shared utility */
-	CanOpenNodeObject* nodePtr = findNodeById(getCanOpenObjectsList(), canOpenNodeId);
-	if (nodePtr == NULL) {
-		return; /* Cannot update non-existent node */
-	}
-	//set vega connected
-	nodePtr->canOpenNodeHandler.vegaConnected = TRUE;
-
-	//save last time vega master send message to LOP
-	nodePtr->canOpenNodeHandler.vegaTicks = HAL_GetTick();
-
-	/* Parse LED state from third byte (byte index 2) and update using shared utility */
-	switch (msg->data[2])
+	if(msg->data[0] == 0xFF)
 	{
-	case DOWN_BUTTON_THIRD_BYTE_CONST_RX:
-	case DOWN_BUTTON_THIRD_BYTE_BLINK_RX:
-		/* DOWN button pressed or blinking - light DOWN LED */
-		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE, TRUE);
-		break;
+		CanOpenNodeObject* nodePtr = getCanOpenObjectsList();
+		uint8_t floorToDisplay = msg->data[4] - 0x30 + 1;
+		uint8_t arrowToDisplay = msg->data[5];
+		uint8_t specialMessage;
 
-	case UP_BUTTON_THIRD_BYTE_CONST_RX:
-	case UP_BUTTON_THIRD_BYTE_BLINK_RX:
-		/* UP button pressed or blinking - light UP LED */
-		setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, TRUE);
-		break;
-	case BOTH_BUTTON_THIRD_BYTE_CONST_RX:
-	case BOTH_BUTTON_THIRD_BYTE_BLINK_RX:
-		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, TRUE);
-		break;
+		if(msg->data[4] < 0x45)
+		{
 
-	case NO_BUTTON_THIRD_BYTE_BLINK_RX:
-		/* No buttons light disable - disable both leds */
-		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, FALSE);
-	default:
-		/* Unknown button state - ignore */
-		break;
+			switch(msg->data[5])
+			{
+			case 0x0D:
+				arrowToDisplay = UP_ARROW;
+				break;
+			case 0x0E:
+				arrowToDisplay = DOWN_ARROW;
+				break;
+			default:
+				arrowToDisplay = NO_ARROW;
+				break;
+			}
+
+			while (nodePtr != NULL)
+			{
+				if(nodePtr->canOpenNodeHandler.displayedFloor != floorToDisplay)
+				{
+					nodePtr->canOpenNodeHandler.displayedFloor = floorToDisplay;
+					nodePtr->canOpenNodeHandler.changeFlags |= DISPLAYED_FLOOR;
+				}
+
+				if(nodePtr->canOpenNodeHandler.displayedArrow != arrowToDisplay)
+				{
+					nodePtr->canOpenNodeHandler.displayedArrow = arrowToDisplay;
+					nodePtr->canOpenNodeHandler.changeFlags = DISPLAYED_ARROW;
+				}
+
+				nodePtr = nodePtr->nextObject;
+			}
+		}
+		else if(msg->data[5] == 0x44)
+		{
+			switch(msg->data[4])
+			{
+			case VEGA_OUT_OF_SERVICE_ID:
+				specialMessage = CANOPEN_SPECIAL_INDICATION_NO_SERVICE;
+				break;
+			case VEGA_INSPECTION_ID:
+				specialMessage = CANOPEN_SPECIAL_INDICATION_MAINTENANCE;
+				break;
+			default:
+				specialMessage = 0;
+				break;
+			}
+
+			while (nodePtr != NULL)
+			{
+				if(nodePtr->canOpenNodeHandler.specialInformation != specialMessage)
+				{
+					nodePtr->canOpenNodeHandler.specialInformation = specialMessage;
+					nodePtr->canOpenNodeHandler.changeFlags |= SPECIAL_INFORMATION;
+				}
+
+				nodePtr = nodePtr->nextObject;
+			}
+		}
+
+	}
+	else
+	{
+		/* Extract floor number from VEGA RX message ID using shared utility */
+		uint8_t floorNumber = extractFloorFromVegaId(msg->data[0]);
+		if (floorNumber == 0xFF) {
+			return; /* Invalid floor number (already validated by validateMessage, but defensive) */
+		}
+
+		/* Convert floor to CANopen node ID (20 + floor number) */
+		uint32_t canOpenNodeId = floorToCanOpenId(floorNumber);
+
+		/* Find corresponding CANopen node in linked list using shared utility */
+		CanOpenNodeObject* nodePtr = findNodeById(getCanOpenObjectsList(), canOpenNodeId);
+		if (nodePtr == NULL) {
+			return; /* Cannot update non-existent node */
+		}
+		//set vega connected
+		nodePtr->canOpenNodeHandler.vegaConnected = TRUE;
+
+		//save last time vega master send message to LOP
+		nodePtr->canOpenNodeHandler.vegaTicks = HAL_GetTick();
+
+		/* Parse LED state from third byte (byte index 2) and update using shared utility */
+		switch (msg->data[2])
+		{
+		case DOWN_BUTTON_THIRD_BYTE_CONST_RX:
+		case DOWN_BUTTON_THIRD_BYTE_BLINK_RX:
+			/* DOWN button pressed or blinking - light DOWN LED */
+			setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE, TRUE);
+			break;
+
+		case UP_BUTTON_THIRD_BYTE_CONST_RX:
+		case UP_BUTTON_THIRD_BYTE_BLINK_RX:
+			/* UP button pressed or blinking - light UP LED */
+			setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, TRUE);
+			break;
+		case BOTH_BUTTON_THIRD_BYTE_CONST_RX:
+		case BOTH_BUTTON_THIRD_BYTE_BLINK_RX:
+			setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, TRUE);
+			break;
+
+		case NO_BUTTON_THIRD_BYTE_BLINK_RX:
+			/* No buttons light disable - disable both leds */
+			setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, FALSE);
+		default:
+			/* Unknown button state - ignore */
+			break;
+		}
 	}
 }
 
@@ -197,6 +269,8 @@ void vegaTransmitSubTask(void)
 		uint32_t txInterval = canOpenObjects->canOpenNodeHandler.vegaConnected ?
 		                      TIME_SEND_CONNECTED : TIME_SEND_NOT_CONNECTED;
 
+		uint8_t vegaFloorNumber = canOpenObjects->canOpenNodeHandler.floorNumber - 1;
+
 		//check if vega master has disconnected to current LOP
 		if(ticksNow - canOpenObjects->canOpenNodeHandler.vegaTicks > CONNECTED_TO_MASTER_TIMEOUT)
 		{
@@ -210,7 +284,7 @@ void vegaTransmitSubTask(void)
 		}
 
 		/* Calculate CAN message ID for this floor/node */
-		sendID = FIRST_SEND_ID + canOpenObjects->canOpenNodeHandler.floorNumber - 1; //TODO to be checked for correctness
+		sendID = FIRST_SEND_ID + vegaFloorNumber; //TODO to be checked for correctness
 
 		/* Validate sendID doesn't exceed array bounds */
 		if (sendID - FIRST_SEND_ID >= 20) {
@@ -228,7 +302,7 @@ void vegaTransmitSubTask(void)
 
 		/* Construct base VEGA message */
 		uint8_t message[CAN_MESSAGE_SIZE] = {
-		    canOpenObjects->canOpenNodeHandler.floorNumber,
+		    vegaFloorNumber,
 		    SECOND_BYTE_VALUE, /* Always 0x0F for VEGA protocol */
 		    0x00,              /* Button state byte - filled below */
 		    0x00               /* Checksum byte - filled below */
