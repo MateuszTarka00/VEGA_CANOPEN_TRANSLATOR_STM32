@@ -84,148 +84,137 @@ void VEGA_InitRTOS(void)
 }
 
 /**
- * @brief Process received VEGA message and update LED states
- * 
- * Parses VEGA protocol messages to update the corresponding CANopen node's
- * LED indicator states. Button state handling is done through CANopen protocol.
- * This function only manages the LED feedback states based on VEGA status.
- * 
- * VEGA message ID to CANopen node mapping:
- * - VEGA RX message ID: 0x80 + floor number (0-19)
- * - CANopen node ID: 20 + floor number (20-39)
- * 
- * LED State Updates:
- * - Constant press (0x01/0x02): LED stays lit (indicates button pressed)
- * - Blinking (0x41/0x82): LED blinks (indicates waiting for acknowledgment)
- * 
- * @param msg Pointer to received CAN message
- * @return None
- * @warning Message parameter must be a valid non-NULL pointer
- * @note Button state updates are handled by CANopen protocol layer
+ * @brief Apply a VEGA display or special-information message to all nodes.
+ *
+ * The 0xFF message variant carries its floor/status code in the fifth byte
+ * and direction or special-information selector in the sixth byte.
+ */
+static void processVegaDisplayMessage(const CAN_Message_t *msg)
+{
+	CanOpenNodeObject *nodePtr = getCanOpenObjectsList();
+	uint8_t statusCode = msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE];
+
+	if (statusCode < VEGA_DISPLAY_FLOOR_ASCII_LIMIT) {
+		uint8_t floorToDisplay =
+			statusCode - VEGA_DISPLAY_FLOOR_ASCII_BASE + VEGA_DISPLAY_FLOOR_NUMBER_OFFSET;
+		uint8_t arrowToDisplay = NO_ARROW;
+
+		switch (msg->data[VEGA_RX_SPECIAL_VALUE_BYTE]) {
+		case VEGA_DISPLAY_UP_ARROW_CODE:
+			arrowToDisplay = UP_ARROW;
+			break;
+		case VEGA_DISPLAY_DOWN_ARROW_CODE:
+			arrowToDisplay = DOWN_ARROW;
+			break;
+		default:
+			break;
+		}
+
+		while (nodePtr != NULL) {
+			CanOpenNodeHandler *node = &nodePtr->canOpenNodeHandler;
+
+			if (node->displayedFloor != floorToDisplay) {
+				node->displayedFloor = floorToDisplay;
+				node->changeFlags |= DISPLAYED_FLOOR;
+			}
+
+			if (node->displayedArrow != arrowToDisplay) {
+				node->displayedArrow = arrowToDisplay;
+				node->changeFlags |= DISPLAYED_ARROW;
+			}
+
+			nodePtr = nodePtr->nextObject;
+		}
+		return;
+	}
+
+	if (msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID) {
+		uint8_t specialMessage = CANOPEN_SPECIAL_INDICATION_NONE;
+
+		switch (statusCode) {
+		case VEGA_OUT_OF_SERVICE_ID:
+			specialMessage = CANOPEN_SPECIAL_INDICATION_NO_SERVICE;
+			break;
+		case VEGA_INSPECTION_ID:
+			specialMessage = CANOPEN_SPECIAL_INDICATION_MAINTENANCE;
+			break;
+		default:
+			break;
+		}
+
+		while (nodePtr != NULL) {
+			CanOpenNodeHandler *node = &nodePtr->canOpenNodeHandler;
+
+			if (node->specialInformation != specialMessage) {
+				node->specialInformation = specialMessage;
+				node->changeFlags |= SPECIAL_INFORMATION;
+			}
+
+			nodePtr = nodePtr->nextObject;
+		}
+	}
+}
+
+/**
+ * @brief Process VEGA button-state and display messages.
+ *
+ * Special display messages are broadcast to all CANopen nodes; standard
+ * messages update the node associated with the VEGA RX identifier.
+ *
+ * @param msg Pointer to received CAN message.
  */
 void processVegaMessage(CAN_Message_t *msg)
 {
-	/* Validate message using shared utility (checks null, length, ID range) */
-//	if (!validateMessage(msg, 3, 7, FIRST_RECEIVE_ID, FIRST_RECEIVE_ID + 20)) {
-//		return; /* Message failed validation */
-//	}
-
-	if(msg->data[0] == 0xFF)
-	{
-		CanOpenNodeObject* nodePtr = getCanOpenObjectsList();
-		uint8_t floorToDisplay = msg->data[4] - 0x30 + 1;
-		uint8_t arrowToDisplay = msg->data[5];
-		uint8_t specialMessage;
-
-		if(msg->data[4] < 0x45)
-		{
-
-			switch(msg->data[5])
-			{
-			case 0x0D:
-				arrowToDisplay = UP_ARROW;
-				break;
-			case 0x0E:
-				arrowToDisplay = DOWN_ARROW;
-				break;
-			default:
-				arrowToDisplay = NO_ARROW;
-				break;
-			}
-
-			while (nodePtr != NULL)
-			{
-				if(nodePtr->canOpenNodeHandler.displayedFloor != floorToDisplay)
-				{
-					nodePtr->canOpenNodeHandler.displayedFloor = floorToDisplay;
-					nodePtr->canOpenNodeHandler.changeFlags |= DISPLAYED_FLOOR;
-				}
-
-				if(nodePtr->canOpenNodeHandler.displayedArrow != arrowToDisplay)
-				{
-					nodePtr->canOpenNodeHandler.displayedArrow = arrowToDisplay;
-					nodePtr->canOpenNodeHandler.changeFlags = DISPLAYED_ARROW;
-				}
-
-				nodePtr = nodePtr->nextObject;
-			}
-		}
-		else if(msg->data[5] == 0x44)
-		{
-			switch(msg->data[4])
-			{
-			case VEGA_OUT_OF_SERVICE_ID:
-				specialMessage = CANOPEN_SPECIAL_INDICATION_NO_SERVICE;
-				break;
-			case VEGA_INSPECTION_ID:
-				specialMessage = CANOPEN_SPECIAL_INDICATION_MAINTENANCE;
-				break;
-			default:
-				specialMessage = 0;
-				break;
-			}
-
-			while (nodePtr != NULL)
-			{
-				if(nodePtr->canOpenNodeHandler.specialInformation != specialMessage)
-				{
-					nodePtr->canOpenNodeHandler.specialInformation = specialMessage;
-					nodePtr->canOpenNodeHandler.changeFlags |= SPECIAL_INFORMATION;
-				}
-
-				nodePtr = nodePtr->nextObject;
-			}
-		}
-
+	if (!validateMessage(msg,
+	                     VEGA_RX_MIN_MESSAGE_LENGTH,
+	                     VEGA_RX_MAX_MESSAGE_LENGTH,
+	                     FIRST_RECEIVE_ID,
+	                     FIRST_RECEIVE_ID + VEGA_RX_FLOOR_COUNT)) {
+		return;
 	}
-	else
-	{
-		/* Extract floor number from VEGA RX message ID using shared utility */
-		uint8_t floorNumber = extractFloorFromVegaId(msg->data[0]);
-		if (floorNumber == 0xFF) {
-			return; /* Invalid floor number (already validated by validateMessage, but defensive) */
-		}
 
-		/* Convert floor to CANopen node ID (20 + floor number) */
-		uint32_t canOpenNodeId = floorToCanOpenId(floorNumber);
+	if (msg->data[VEGA_RX_MESSAGE_ID_BYTE] == VEGA_RX_SPECIAL_MESSAGE_MARKER) {
+		processVegaDisplayMessage(msg);
+		return;
+	}
 
-		/* Find corresponding CANopen node in linked list using shared utility */
-		CanOpenNodeObject* nodePtr = findNodeById(getCanOpenObjectsList(), canOpenNodeId);
-		if (nodePtr == NULL) {
-			return; /* Cannot update non-existent node */
-		}
-		//set vega connected
-		nodePtr->canOpenNodeHandler.vegaConnected = TRUE;
+	uint8_t floorNumber = extractFloorFromVegaId(msg->data[VEGA_RX_MESSAGE_ID_BYTE]);
+	if (floorNumber == VEGA_INVALID_FLOOR_NUMBER) {
+		return;
+	}
 
-		//save last time vega master send message to LOP
-		nodePtr->canOpenNodeHandler.vegaTicks = HAL_GetTick();
+	uint32_t canOpenNodeId = floorToCanOpenId(floorNumber);
+	CanOpenNodeObject *nodePtr = findNodeById(getCanOpenObjectsList(), canOpenNodeId);
+	if (nodePtr == NULL) {
+		return;
+	}
 
-		/* Parse LED state from third byte (byte index 2) and update using shared utility */
-		switch (msg->data[2])
-		{
-		case DOWN_BUTTON_THIRD_BYTE_CONST_RX:
-		case DOWN_BUTTON_THIRD_BYTE_BLINK_RX:
-			/* DOWN button pressed or blinking - light DOWN LED */
-			setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE, TRUE);
-			break;
+	/* Update connection tracking before applying the received button state. */
+	nodePtr->canOpenNodeHandler.vegaConnected = TRUE;
+	nodePtr->canOpenNodeHandler.vegaTicks = HAL_GetTick();
 
-		case UP_BUTTON_THIRD_BYTE_CONST_RX:
-		case UP_BUTTON_THIRD_BYTE_BLINK_RX:
-			/* UP button pressed or blinking - light UP LED */
-			setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, TRUE);
-			break;
-		case BOTH_BUTTON_THIRD_BYTE_CONST_RX:
-		case BOTH_BUTTON_THIRD_BYTE_BLINK_RX:
-			setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, TRUE);
-			break;
+	switch (msg->data[VEGA_RX_BUTTON_STATE_BYTE]) {
+	case DOWN_BUTTON_THIRD_BYTE_CONST_RX:
+	case DOWN_BUTTON_THIRD_BYTE_BLINK_RX:
+		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE, TRUE);
+		break;
 
-		case NO_BUTTON_THIRD_BYTE_BLINK_RX:
-			/* No buttons light disable - disable both leds */
-			setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, FALSE);
-		default:
-			/* Unknown button state - ignore */
-			break;
-		}
+	case UP_BUTTON_THIRD_BYTE_CONST_RX:
+	case UP_BUTTON_THIRD_BYTE_BLINK_RX:
+		setLedState(&nodePtr->canOpenNodeHandler, UP_LED_STATE, TRUE);
+		break;
+
+	case BOTH_BUTTON_THIRD_BYTE_CONST_RX:
+	case BOTH_BUTTON_THIRD_BYTE_BLINK_RX:
+		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, TRUE);
+		break;
+
+	case NO_BUTTON_THIRD_BYTE_BLINK_RX:
+		setLedState(&nodePtr->canOpenNodeHandler, DOWN_LED_STATE | UP_LED_STATE, FALSE);
+		break;
+
+	default:
+		break;
 	}
 }
 

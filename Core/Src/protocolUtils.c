@@ -196,13 +196,29 @@ bool validateMessage(
         return false;
     }
 
-    /* Validate message length is within bounds */
-    if (msg->len < minLen || msg->len > maxLen) {
+    if (msg->len < minLen || msg->len > maxLen || msg->len > 8) {
         return false;
     }
 
-    /* Validate message ID is within range */
-    if (msg->data[0] < minFloorID || msg->data[0] >= maxFloorID) {
+    if (msg->data[VEGA_RX_MESSAGE_ID_BYTE] == VEGA_RX_SPECIAL_MESSAGE_MARKER) {
+        if (msg->len < VEGA_RX_SPECIAL_MIN_MESSAGE_LENGTH) {
+            return false;
+        }
+
+        bool isFloorMessage =
+            msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] >= VEGA_DISPLAY_FLOOR_ASCII_BASE &&
+            msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] < VEGA_DISPLAY_FLOOR_ASCII_LIMIT;
+        bool isSpecialInformationMessage =
+            msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID &&
+            (msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] == VEGA_OUT_OF_SERVICE_ID ||
+             msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] == VEGA_INSPECTION_ID);
+
+        return isFloorMessage || isSpecialInformationMessage;
+    }
+
+    /* Validate standard message length and payload ID range */
+    if (msg->data[VEGA_RX_MESSAGE_ID_BYTE] < minFloorID ||
+        msg->data[VEGA_RX_MESSAGE_ID_BYTE] >= maxFloorID) {
         return false;
     }
 
@@ -377,13 +393,14 @@ uint32_t floorToCanOpenId(uint8_t floorNumber)
  * Encapsulates: floor = msg_id - FIRST_RECEIVE_ID (0x80)
  * 
  * @param vegaMessageId VEGA message ID (0x80 - 0x93)
- * @return Floor number (0-19) or 0xFF if invalid
+ * @return Floor number (0-19) or VEGA_INVALID_FLOOR_NUMBER if invalid
  */
 uint8_t extractFloorFromVegaId(uint32_t vegaMessageId)
 {
     /* Validate message ID is in VEGA RX range */
-    if (vegaMessageId < FIRST_RECEIVE_ID || vegaMessageId >= (FIRST_RECEIVE_ID + 20)) {
-        return 0xFF;  /* Invalid - return marker value */
+    if (vegaMessageId < FIRST_RECEIVE_ID ||
+        vegaMessageId >= (FIRST_RECEIVE_ID + VEGA_RX_FLOOR_COUNT)) {
+        return VEGA_INVALID_FLOOR_NUMBER;
     }
 
     return (uint8_t)(vegaMessageId - FIRST_RECEIVE_ID + 1); //canOpen first = 1, vega first = 0

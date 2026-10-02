@@ -73,6 +73,23 @@
 
 #define VEGA_OUT_OF_SERVICE_ID		0x53
 
+/* VEGA RX payload layout and display-message values */
+#define VEGA_RX_MESSAGE_ID_BYTE                 0
+#define VEGA_RX_BUTTON_STATE_BYTE               2
+#define VEGA_RX_SPECIAL_FLOOR_BYTE              4
+#define VEGA_RX_SPECIAL_VALUE_BYTE              5
+#define VEGA_RX_MIN_MESSAGE_LENGTH              3
+#define VEGA_RX_MAX_MESSAGE_LENGTH              7
+#define VEGA_RX_SPECIAL_MIN_MESSAGE_LENGTH      6
+#define VEGA_RX_SPECIAL_MESSAGE_MARKER          0xFF
+#define VEGA_INVALID_FLOOR_NUMBER               0xFF
+#define VEGA_RX_FLOOR_COUNT                     20
+#define VEGA_DISPLAY_FLOOR_ASCII_BASE           0x30
+#define VEGA_DISPLAY_FLOOR_ASCII_LIMIT          0x45
+#define VEGA_DISPLAY_FLOOR_NUMBER_OFFSET        1
+#define VEGA_DISPLAY_UP_ARROW_CODE              0x0D
+#define VEGA_DISPLAY_DOWN_ARROW_CODE            0x0E
+
 /* ============================================================================ */
 /* VEGA TX MESSAGE BUTTON STATE BYTE VALUES                                  */
 /* ============================================================================ */
