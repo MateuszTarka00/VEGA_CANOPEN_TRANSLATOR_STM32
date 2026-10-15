@@ -6,7 +6,7 @@
 #ifndef FIRMWARE_IDENTITY_H
 #define FIRMWARE_IDENTITY_H
 #include <stdint.h>
-#define APP_MODULE_NAME "VEGA CANopen LOP gateway"
+#define APP_MODULE_NAME "VEGA CANopen gateway"
 #define APP_SW_VERSION_MAJOR 0
 #define APP_SW_VERSION_MINOR 1
 #define APP_SW_VERSION_PATCH 0

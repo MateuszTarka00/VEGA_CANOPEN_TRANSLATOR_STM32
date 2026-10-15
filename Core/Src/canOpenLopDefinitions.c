@@ -251,7 +251,48 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
 
     /* Handle displayed floor indicator change */
     if (node->changeFlags & DISPLAYED_FLOOR) {
-        FloorDisplayMessageTx msg;
+        FloorDisplayMessageTx msg = {0};
+        sdoRxTx sdo = {0};
+
+        /* Convert floor number to ASCII string */
+        char floorText[5] = {0};
+
+        int textLength = snprintf(
+            floorText,
+            sizeof(floorText),
+            "%u",
+            (unsigned int)node->displayedFloor
+        );
+
+        /* SDO expedited download supports 1-4 bytes */
+        if (textLength > 0 && textLength <= 4) {
+
+            /* Select SDO command based on string length */
+            switch (textLength) {
+                case 1: sdo.command = 0x2F; break;
+                case 2: sdo.command = 0x2B; break;
+                case 3: sdo.command = 0x27; break;
+                case 4: sdo.command = 0x23; break;
+                default: break;
+            }
+
+            sdo.index = CAR_FLOOR_TEXT_OD;    /* 0x6530 */
+            sdo.subIndex = CAR_FLOOR_TEXT_SUB; /* 0x02 */
+
+            memcpy(
+                sdo.returnedData,
+                floorText,
+                (size_t)textLength
+            );
+
+            /* Write floor text to OD */
+            protocolSend(
+                MASTER_LOP_TX_SDO + node->canOpenID,
+                sdo.data,
+                8,
+                PROTOCOL_CANOPEN
+            );
+        }
 
         /* Compose floor display message */
         msg.function = LOP_LIFT_DISPLAY_FLOOR_ID;
@@ -259,12 +300,17 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
         msg.floorNumber = node->floorNumber;
         msg.liftMap = node->liftMap;
         msg.floorIndicator = node->displayedFloor;
-        msg.onOff = TRUE; /* Always enable floor display */
+        msg.onOff = TRUE;
 
-        /* Transmit message */
-        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+        /* Transmit floor display message */
+        protocolSend(
+            MASTER_LOP_TX_ID,
+            msg.data,
+            CAN_OPEN_MSG_PDO_LENGTH,
+            PROTOCOL_CANOPEN
+        );
 
-        /* Clear change flag after transmission */
+        /* Clear change flag */
         node->changeFlags &= (~DISPLAYED_FLOOR);
     }
 

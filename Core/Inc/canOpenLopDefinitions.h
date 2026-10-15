@@ -43,6 +43,9 @@
 /** @brief Master RX ID for lift/door configuration (SDO response) */
 #define MASTER_LOP_RX_LIFT_DOOR 0x580
 
+/** @brief Master TX ID for SDO configuration (SDO) */
+#define MASTER_LOP_TX_SDO 		0x600
+
 /* ============================================================================ */
 /* LOP FUNCTION IDs & PROTOCOL CONSTANTS                                     */
 /* ============================================================================ */
@@ -105,6 +108,10 @@
 
 /** @brief OD address for door mask (0x6003) */
 #define DOOR_MASK                  0x6003
+
+/** @brief OD address for car floor text (0x6530) */
+#define CAR_FLOOR_TEXT_OD		   0x6530
+#define CAR_FLOOR_TEXT_SUB		   0x02
 
 /* ============================================================================ */
 /* ENUMERATED TYPES                                                           */

@@ -53,7 +53,7 @@ static void memoryInit(Memory *m, PsStore *s)
 static PsData identity(void)
 {
     PsData d = {0};
-    strcpy(d.device_name, "VEGA CANopen LOP gateway");
+    strcpy(d.device_name, "VEGA CANopen gateway");
     strcpy(d.hardware_version, "A1"); strcpy(d.software_version, "2.0");
     d.product_code = 42U; d.revision = 1U; d.serial = 1234U;
     d.heartbeat_ms = 1000U; d.pending_slot = UINT32_MAX;
