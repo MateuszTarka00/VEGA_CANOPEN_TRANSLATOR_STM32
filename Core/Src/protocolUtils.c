@@ -98,6 +98,14 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     );
 
     if (status != HAL_OK) {
+        if (hfdcan == &hfdcan1) { canOpenRxErrors++; }
+        return;
+    }
+    if ((rxHeader.IdType != FDCAN_STANDARD_ID) ||
+        (rxHeader.RxFrameType != FDCAN_DATA_FRAME) ||
+        (rxHeader.FDFormat != FDCAN_CLASSIC_CAN) ||
+        (DLC2LEN(rxHeader.DataLength) > 8U)) {
+        if (hfdcan == &hfdcan1) { canOpenRxErrors++; }
         return;
     }
 
@@ -107,7 +115,10 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     /* Route to appropriate queue based on FDCAN interface */
     if (hfdcan == &hfdcan1) {
         /* CANopen message - queue to canOpenRxQueue */
-        xQueueSendFromISR(canOpenRxQueue, &msg, &hpw);
+        if ((canOpenRxQueue == NULL) ||
+            (xQueueSendFromISR(canOpenRxQueue, &msg, &hpw) != pdTRUE)) {
+            canOpenRxDropped++;
+        }
         portYIELD_FROM_ISR(hpw);
     } else if (hfdcan == &hfdcan2) {
         /* VEGA message - queue to vegaRxQueue */
@@ -149,6 +160,14 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
     );
 
     if (status != HAL_OK) {
+        if (hfdcan == &hfdcan1) { canOpenRxErrors++; }
+        return;
+    }
+    if ((rxHeader.IdType != FDCAN_STANDARD_ID) ||
+        (rxHeader.RxFrameType != FDCAN_DATA_FRAME) ||
+        (rxHeader.FDFormat != FDCAN_CLASSIC_CAN) ||
+        (DLC2LEN(rxHeader.DataLength) > 8U)) {
+        if (hfdcan == &hfdcan1) { canOpenRxErrors++; }
         return;
     }
 
@@ -158,7 +177,10 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
     /* Route to appropriate queue based on FDCAN interface */
     if (hfdcan == &hfdcan1) {
         /* CANopen message - queue to canOpenRxQueue */
-        xQueueSendFromISR(canOpenRxQueue, &msg, &hpw);
+        if ((canOpenRxQueue == NULL) ||
+            (xQueueSendFromISR(canOpenRxQueue, &msg, &hpw) != pdTRUE)) {
+            canOpenRxDropped++;
+        }
         portYIELD_FROM_ISR(hpw);
     } else if (hfdcan == &hfdcan2) {
         /* VEGA message - queue to vegaRxQueue */
@@ -461,7 +483,5 @@ bool protocolSend(uint32_t messageId, const uint8_t *data, uint8_t length, Proto
     }
 
     /* Queue message for transmission */
-    HAL_FDCAN_AddMessageToTxFifoQ(targetHandle, &txHeader, (uint8_t *)data);
-    
-    return true;
+    return HAL_FDCAN_AddMessageToTxFifoQ(targetHandle, &txHeader, (uint8_t *)data) == HAL_OK;
 }

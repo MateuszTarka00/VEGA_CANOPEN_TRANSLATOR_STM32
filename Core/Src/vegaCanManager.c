@@ -18,7 +18,6 @@
  */
 
 #include "vegaCanManager.h"
-#include "flash.h"
 #include "vegaCanDefinitions.h"
 #include "protocolUtils.h"
 #include "semphr.h"
@@ -54,10 +53,6 @@ extern SemaphoreHandle_t canOpenNodesListMutex;
 
 /** @brief Queue handle for receiving VEGA messages from CAN ISR */
 QueueHandle_t vegaRxQueue;
-
-/* ============================================================================ */
-/* FORWARD DECLARATIONS - Callback functions defined later in this file       */
-/* ============================================================================ */
 
 /**
  * @brief Initialize FreeRTOS queue for VEGA message reception

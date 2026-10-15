@@ -9,20 +9,19 @@
 #define INC_FLASH_H_
 
 #include "main.h"
+#include <stdbool.h>
+#include "factory_identity.h"
 
-typedef struct
-{
-	uint8_t virtualInputs[16][6];
-	uint8_t virtualOutputs[16][6];
-}Flash_virtualInputOutput;
+/** Read-only factory access. No application API erases or writes this page. */
+FiResult Flash_FactoryRead(FiData *data);
 
-extern Flash_virtualInputOutput flash_virtualInputOutput;
-
-void Flash_ErasePage(uint32_t pageIndex);
-void Flash_WriteStruct(uint32_t pageIndex, const Flash_virtualInputOutput *data);
-void Flash_ReadStruct(uint32_t pageIndex, Flash_virtualInputOutput *data);
-uint32_t Flash_GetPageAddress(uint32_t pageIndex);
-uint8_t checkStructEmpty(const Flash_virtualInputOutput *data);
-
+/**
+ * @brief Bounded CANopen NVM access; logical pages 0/1, 2 KiB each.
+ * All callers must serialize writes.
+ * Returns false on invalid range, unsupported bank configuration or HAL error.
+ */
+bool Flash_NvmRead(uint8_t page, uint32_t offset, uint8_t *data, uint32_t size);
+bool Flash_NvmErase(uint8_t page);
+bool Flash_NvmWrite(uint8_t page, uint32_t offset, const uint8_t *data, uint32_t size);
 
 #endif /* INC_FLASH_H_ */

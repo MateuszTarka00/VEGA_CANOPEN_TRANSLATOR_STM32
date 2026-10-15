@@ -26,14 +26,13 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "tim.h"
 #include "fdcan.h"
-#include "softwareTimer_ms.h"
-#include "iwdg.h"
 #include "canOpenManager.h"
 #include "canOpenLopDefinitions.h"
 #include "vegaCanManager.h"
 #include "protocolUtils.h"
+#include "canopen_port.h"
+#include "canopen_nmt.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,9 +43,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define CANOPEN_TASK_DELAY_MS 			1
-#define HEARTBEAT_INTERVAL_MS			1000
-#define VEGA_TX_INTERVAL_MS				100
-#define CANOPEN_ID						1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -241,8 +237,7 @@ void tranciever(void *argument)
 /**
 * @brief Function implementing the CanOpenMenagerT thread.
 * @brief Responsible for:
-*        - Sending CANopen master heartbeat every 1 second
-*        - Processing received CANopen messages (LOP messages, button states, device config)
+*        - Monitoring remote node heartbeat timeouts
 *        - Managing CANopen node state machine and NMT transitions
 *        - Handling SDO requests for device configuration
 *        - Transmitting CANopen node messages (LED states, floor display)
@@ -254,22 +249,15 @@ void canOpenMenager(void *argument)
 {
   /* USER CODE BEGIN canOpenMenager */
   CanOpenNodeObject* nodePtr = NULL;
-  TickType_t lastHeartbeatTime = xTaskGetTickCount();
   
 	  /* Infinite loop */
 	  for(;;)
 	  {
-//	    HAL_IWDG_Refresh(&hiwdg);
 		ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CANOPEN_TASK_DELAY_MS));
 		
 		TickType_t currentTime = xTaskGetTickCount();
 		
-		/* Send master heartbeat every 1 second */
-		if ((currentTime - lastHeartbeatTime) >= pdMS_TO_TICKS(HEARTBEAT_INTERVAL_MS))
-		{
-		  CANOPEN_SendMasterHeartbeat();
-		  lastHeartbeatTime = currentTime;
-		}
+		/* Local boot-up/heartbeat and OD are owned by CanOpenRxT. */
 
 		/* Flag nodes that have not sent a heartbeat within the timeout window */
 		CANOPEN_CheckHeartbeatTimeouts();
@@ -279,11 +267,18 @@ void canOpenMenager(void *argument)
 		while (nodePtr != NULL)
 		{
 		  /* Handle NMT state transitions: PRE_OPERATIONAL -> OPERATIONAL */
-		  if (nodePtr->canOpenNodeHandler.nmtState == CO_NMT_PRE_OPERATIONAL)
+		  if ((nodePtr->canOpenNodeHandler.nmtState == CO_NMT_PRE_OPERATIONAL) &&
+		      (!nodePtr->canOpenNodeHandler.nmtStartSent ||
+		       ((currentTime - nodePtr->canOpenNodeHandler.lastNmtStartTime) >= pdMS_TO_TICKS(500U))))
 		  {
 			/* Send NMT start command to transition to operational state */
-			uint8_t nmtMessage[2] = {1, nodePtr->canOpenNodeHandler.canOpenID};
-			protocolSend(0x000, nmtMessage, 2, PROTOCOL_CANOPEN);
+			CoFrame command;
+			if (CoNmt_Command(&command, 1U, (uint8_t)nodePtr->canOpenNodeHandler.canOpenID)) {
+				if (protocolSend(command.id, command.data, command.length, PROTOCOL_CANOPEN)) {
+					nodePtr->canOpenNodeHandler.nmtStartSent = TRUE;
+					nodePtr->canOpenNodeHandler.lastNmtStartTime = currentTime;
+				}
+			}
 		  }
 		  
 		  /* Handle LOP requests: Send after NMT handshake initiated */
@@ -347,6 +342,7 @@ void vegaRx(void *argument)
 /* USER CODE BEGIN Header_canOpenRx */
 /**
 * @brief Function implementing the CanOpenRxT thread.
+* @brief Owns local OD/SDO, boot-up, heartbeat and EMCY services, and routes remote LOP traffic.
 * @param argument: Not used
 * @retval None
 */
@@ -354,14 +350,21 @@ void vegaRx(void *argument)
 void canOpenRx(void *argument)
 {
   /* USER CODE BEGIN canOpenRx */
+  CanopenPort_Init();
   /* Infinite loop */
   for(;;)
   {
 	CAN_Message_t msg;
-	if(xQueueReceive(canOpenRxQueue, &msg, portMAX_DELAY) == pdTRUE)
+	CanopenPort_Poll();
+	if (!CanopenPort_Ready()) {
+		osDelay(1U);
+		continue;
+	}
+	if(xQueueReceive(canOpenRxQueue, &msg, pdMS_TO_TICKS(1U)) == pdTRUE)
 	{
-//		HAL_IWDG_Refresh(&hiwdg);
-		processCanOpenMessage(&msg);
+		if (!CanopenPort_Receive(&msg)) {
+			processCanOpenMessage(&msg);
+		}
 	}
   }
   /* USER CODE END canOpenRx */

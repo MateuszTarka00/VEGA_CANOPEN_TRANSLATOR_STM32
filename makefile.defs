@@ -1,0 +1,8 @@
+# STM32CubeIDE supported hook: include new sources without editing Debug output.
+# Once CubeIDE regenerates OBJS, filter-out avoids duplicate link inputs.
+CANOPEN_MODULES := canopen canopen_nmt canopen_sdo canopen_heartbeat canopen_emcy \
+ object_dictionary persistent_storage factory_identity bootloader_handoff canopen_port
+CANOPEN_OBJECTS := $(addprefix Core/Src/,$(addsuffix .o,$(CANOPEN_MODULES)))
+CANOPEN_EXTRA_OBJECTS := $(filter-out $(patsubst ./%,%,$(OBJS)),$(CANOPEN_OBJECTS))
+USER_OBJS += $(CANOPEN_EXTRA_OBJECTS)
+-include $(CANOPEN_EXTRA_OBJECTS:.o=.d)

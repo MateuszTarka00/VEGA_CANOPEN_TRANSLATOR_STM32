@@ -8,77 +8,73 @@
 #include "flash.h"
 #include <string.h>
 
-#define FLASH_BASE_ADDR     0x08000000U
+/* Reserved by both linker scripts; no collision with application sections. */
+extern uint8_t __canopen_nvm_start__[];
+extern uint8_t __factory_identity_start__[];
 
-Flash_virtualInputOutput flash_virtualInputOutput = {};
-
-// Calculate page start address
-uint32_t Flash_GetPageAddress(uint32_t pageIndex)
+FiResult Flash_FactoryRead(FiData *data)
 {
-    return FLASH_BASE_ADDR + (pageIndex * FLASH_PAGE_SIZE);
-}
-
-void Flash_ErasePage(uint32_t pageIndex)
-{
-    HAL_FLASH_Unlock();
-
-    FLASH_EraseInitTypeDef eraseInit = {0};
-    uint32_t pageError = 0;
-
-    eraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
-    eraseInit.NbPages = 1;
-    eraseInit.Page = pageIndex - 64;
-    eraseInit.Banks = FLASH_BANK_2;
-
-    if (HAL_FLASHEx_Erase(&eraseInit, &pageError) != HAL_OK) {
-        // Handle error
-        HAL_FLASH_Lock();
-        return;
+    if (data == NULL) { return FI_INVALID; }
+    memset(data, 0, sizeof(*data));
+    if ((FLASH_SIZE != UINT32_C(0x80000)) ||
+        ((uintptr_t)__factory_identity_start__ != FI_FLASH_ADDRESS) ||
+        ((FLASH_BANK_NB == 2U) && ((FLASH->OPTR & FLASH_OPTR_nSWAP_BANK) == 0U))) {
+        return FI_IO_ERROR;
     }
-
-    HAL_FLASH_Lock();
+    return Fi_Decode(__factory_identity_start__, FI_RECORD_SIZE, data);
 }
 
-void Flash_WriteStruct(uint32_t pageIndex, const Flash_virtualInputOutput *data)
+static bool nvmRange(uint8_t page, uint32_t offset, uint32_t size)
 {
-    HAL_FLASH_Unlock();
+    return (page < 2U) && (offset <= FLASH_PAGE_SIZE) &&
+        (size <= FLASH_PAGE_SIZE - offset) &&
+        (FLASH_SIZE == UINT32_C(0x80000)) &&
+        ((uintptr_t)__canopen_nvm_start__ == FI_NVM_ADDRESS);
+}
 
-    uint32_t address = Flash_GetPageAddress(pageIndex);
-    const uint8_t *src = (const uint8_t *)data;
+bool Flash_NvmRead(uint8_t page, uint32_t offset, uint8_t *data, uint32_t size)
+{
+    if ((data == NULL) || !nvmRange(page, offset, size)) { return false; }
+    memcpy(data, &__canopen_nvm_start__[(uint32_t)page * FLASH_PAGE_SIZE + offset], size);
+    return true;
+}
 
-    for (uint32_t i = 0; i < sizeof(Flash_virtualInputOutput); i += 8) {
-        uint64_t dword = 0xFFFFFFFFFFFFFFFFULL;
-        memcpy(&dword, src + i, (sizeof(Flash_virtualInputOutput) - i >= 8) ? 8 : (sizeof(Flash_virtualInputOutput) - i));
-
-        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, address + i, dword) != HAL_OK) {
-            // Handle error
-            break;
-        }
+bool Flash_NvmErase(uint8_t page)
+{
+    FLASH_EraseInitTypeDef erase = {0};
+    uint32_t error = 0U;
+    uint32_t address;
+    HAL_StatusTypeDef status, lockStatus;
+    if (!nvmRange(page, 0U, FLASH_PAGE_SIZE)) { return false; }
+    /* Do not guess physical-bank mapping after option-byte bank swapping. */
+    if ((FLASH_BANK_NB == 2U) && ((FLASH->OPTR & FLASH_OPTR_nSWAP_BANK) == 0U)) {
+        return false;
     }
-
-    HAL_FLASH_Lock();
+    address = (uint32_t)(uintptr_t)__canopen_nvm_start__ + (uint32_t)page * FLASH_PAGE_SIZE;
+    erase.TypeErase = FLASH_TYPEERASE_PAGES; erase.NbPages = 1U;
+    erase.Banks = ((address - FLASH_BASE) >= FLASH_BANK_SIZE) ? FLASH_BANK_2 : FLASH_BANK_1;
+    erase.Page = ((address - FLASH_BASE) % FLASH_BANK_SIZE) / FLASH_PAGE_SIZE;
+    if (HAL_FLASH_Unlock() != HAL_OK) { return false; }
+    status = HAL_FLASHEx_Erase(&erase, &error);
+    lockStatus = HAL_FLASH_Lock();
+    return (status == HAL_OK) && (lockStatus == HAL_OK);
 }
 
-void Flash_ReadStruct(uint32_t pageIndex, Flash_virtualInputOutput *data)
+bool Flash_NvmWrite(uint8_t page, uint32_t offset, const uint8_t *data, uint32_t size)
 {
-    memcpy(data, (const void *)Flash_GetPageAddress(pageIndex), sizeof(Flash_virtualInputOutput));
+    uint32_t i, address;
+    HAL_StatusTypeDef status = HAL_OK, lockStatus;
+    if ((data == NULL) || !nvmRange(page, offset, size) ||
+        ((offset % 8U) != 0U) || ((size % 8U) != 0U)) { return false; }
+    address = (uint32_t)(uintptr_t)__canopen_nvm_start__ + (uint32_t)page * FLASH_PAGE_SIZE + offset;
+    if (HAL_FLASH_Unlock() != HAL_OK) { return false; }
+    for (i = 0U; i < size; i += 8U) {
+        uint64_t word;
+        memcpy(&word, &data[i], sizeof(word));
+        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, address + i, word);
+        if (status != HAL_OK) { break; }
+    }
+    lockStatus = HAL_FLASH_Lock();
+    return (status == HAL_OK) && (lockStatus == HAL_OK) &&
+        (memcmp((const void *)(uintptr_t)address, data, size) == 0);
 }
-
-uint8_t checkStructEmpty(const Flash_virtualInputOutput *data)
-{
-	const uint8_t *src = (const uint8_t *)data;
-
-	for(uint16_t i = 0; i < sizeof(*data); ++i)
-	{
-		if(*src != 0xFF)
-		{
-			return 0;
-		}
-
-		src++;
-	}
-	return 1;
-}
-
-
-

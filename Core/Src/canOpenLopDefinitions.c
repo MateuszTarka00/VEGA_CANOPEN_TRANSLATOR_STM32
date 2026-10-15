@@ -90,16 +90,6 @@ void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
 			sdoRxTx decomposedMessage;
 			memcpy(decomposedMessage.data, msg->data, CAN_OPEN_MSG_SDO_LENGTH);
 
-			/* Parse SDO command field to determine response type */
-		uint8_t expedited = (decomposedMessage.command >> 1) & 0x01; /* Bit 1: expedited transfer */
-		uint8_t sizeIndicated = decomposedMessage.command & 0x01;    /* Bit 0: size indicated */
-		uint8_t unusedBytes = (decomposedMessage.command >> 2) & 0x03; /* Bits 3-2: unused bytes count */
-
-		/* Calculate actual data length for expedited transfers (for future use) */
-		if (expedited && sizeIndicated) {
-			/* dataLength = 4 - unusedBytes; */ /* Valid range: 1-4 bytes */
-		}
-
 		/* Update node configuration based on Object Dictionary index */
 		switch (decomposedMessage.index)
 		{

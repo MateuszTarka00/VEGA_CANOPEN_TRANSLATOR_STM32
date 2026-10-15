@@ -96,15 +96,18 @@ int main(void)
   MX_TIM17_Init();
   MX_FDCAN1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
-  HAL_FDCAN_Start(&hfdcan1);
-  HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
-  HAL_FDCAN_Start(&hfdcan2);
+  /* CAN RX is enabled only after MX_FREERTOS_Init has created its queues. */
   /* USER CODE END 2 */
 
   /* Init scheduler */
   osKernelInitialize();  /* Call init function for freertos objects (in freertos.c) */
   MX_FREERTOS_Init();
+  if ((HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0U) != HAL_OK) ||
+      (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) ||
+      (HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0U) != HAL_OK) ||
+      (HAL_FDCAN_Start(&hfdcan2) != HAL_OK)) {
+    Error_Handler();
+  }
   /* Start scheduler */
   osKernelStart();
 

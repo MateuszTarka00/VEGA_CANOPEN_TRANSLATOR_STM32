@@ -189,6 +189,8 @@ typedef struct
     bool heartbeatReceived;          /**< At least one heartbeat received from this node */
     TickType_t lastHeartbeatTime;    /**< Timestamp of last heartbeat message (ticks) */
     bool heartbeatTimeoutError;      /**< Set when no heartbeat received within CAN_OPEN_HEARTBEAT_TIMEOUT_MS */
+    bool nmtStartSent;               /**< Rate-limit Start while waiting for operational heartbeat */
+    TickType_t lastNmtStartTime;
 
 } CanOpenNodeHandler;
 
@@ -233,6 +235,9 @@ typedef struct
 
 /** @brief Queue handle for CANopen message reception from ISR */
 extern QueueHandle_t canOpenRxQueue;
+/** ISR diagnostics, sampled under a critical section by the CANopen owner task. */
+extern volatile uint32_t canOpenRxDropped;
+extern volatile uint32_t canOpenRxErrors;
 
 /** @brief Mutex for protecting canOpenNodesList from race conditions */
 extern SemaphoreHandle_t canOpenNodesListMutex;
@@ -262,17 +267,5 @@ void CANOPEN_CheckHeartbeatTimeouts(void);
  * @return Pointer to first node in list, or NULL if empty
  */
 CanOpenNodeObject* getCanOpenObjectsList(void);
-
-/**
- * @brief Send CANopen master heartbeat message
- * 
- * Transmits a heartbeat message from the master node (node ID 1) indicating it is alive
- * and operational. Should be called periodically (100-500ms intervals).
- * 
- * Heartbeat COB-ID: 0x701 (0x700 + master node ID 1)
- * 
- * @see CiA 301 - Heartbeat Protocol Specification
- */
-void CANOPEN_SendMasterHeartbeat(void);
 
 #endif /* CAN_OPEN_MANAGER_H */

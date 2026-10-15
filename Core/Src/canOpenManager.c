@@ -13,11 +13,11 @@
  */
 
 #include "canOpenManager.h"
-#include "stdlib.h"
+#include <stddef.h>
 #include "fdcan.h"
 #include "canOpenLopDefinitions.h"
-#include "protocolUtils.h"
 #include "semphr.h"
+#include "canopen_heartbeat.h"
 
 /* Global linked list of CANopen node objects */
 CanOpenNodeObject *canOpenNodesList = NULL;
@@ -27,10 +27,14 @@ QueueHandle_t canOpenRxQueue;
 
 /* Mutex for protecting canOpenNodesList from race conditions */
 SemaphoreHandle_t canOpenNodesListMutex = NULL;
+volatile uint32_t canOpenRxDropped;
+volatile uint32_t canOpenRxErrors;
 
-/* ============================================================================ */
-/* FORWARD DECLARATIONS - Callback functions defined later in this file       */
-/* ============================================================================ */
+static StaticQueue_t canOpenQueueControl;
+static uint8_t canOpenQueueStorage[16U * sizeof(CAN_Message_t)];
+static StaticSemaphore_t canOpenMutexControl;
+static CanOpenNodeObject nodePool[127];
+static uint8_t allocatedNodes;
 
 /**
  * @brief Initialize FreeRTOS queue for CANopen message reception
@@ -43,7 +47,8 @@ SemaphoreHandle_t canOpenNodesListMutex = NULL;
  */
 void CANOPEN_InitRTOS(void)
 {
-	canOpenRxQueue = xQueueCreate(16, sizeof(CAN_Message_t));
+	canOpenRxQueue = xQueueCreateStatic(16U, sizeof(CAN_Message_t),
+		canOpenQueueStorage, &canOpenQueueControl);
 	if (canOpenRxQueue == NULL) {
 		/* Queue creation failed - system is out of heap memory */
 		while (1) {
@@ -52,7 +57,7 @@ void CANOPEN_InitRTOS(void)
 	}
 
 	/* Create mutex for protecting linked list access from race conditions */
-	canOpenNodesListMutex = xSemaphoreCreateMutex();
+	canOpenNodesListMutex = xSemaphoreCreateMutexStatic(&canOpenMutexControl);
 	if (canOpenNodesListMutex == NULL) {
 		/* Mutex creation failed - system is out of heap memory */
 		while (1) {
@@ -68,7 +73,7 @@ void CANOPEN_InitRTOS(void)
 /**
  * @brief Create and initialize a new CANopen node object
  * 
- * Allocates memory for a new CANopen node and initializes all fields to default values.
+ * Takes a node from a fixed pool and initializes all fields to default values.
  * Each node represents a single elevator floor with associated state and control information.
  * 
  * @param id CANopen node ID (typically 0-127)
@@ -76,12 +81,9 @@ void CANOPEN_InitRTOS(void)
  */
 static CanOpenNodeObject* createNode(uint32_t id)
 {
-	/* Allocate memory for new node */
-	CanOpenNodeObject *node = malloc(sizeof(CanOpenNodeObject));
-
-	if (node == NULL) {
-		return NULL; /* Memory allocation failed */
-	}
+	CanOpenNodeObject *node;
+	if (allocatedNodes >= 127U) { return NULL; }
+	node = &nodePool[allocatedNodes++];
 
 	/* Initialize all node fields to default/safe values */
 	node->canOpenNodeHandler.vegaTicks = 0;
@@ -108,6 +110,8 @@ static CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.heartbeatReceived = FALSE;
 	node->canOpenNodeHandler.lastHeartbeatTime = 0;
 	node->canOpenNodeHandler.heartbeatTimeoutError = FALSE;
+	node->canOpenNodeHandler.nmtStartSent = FALSE;
+	node->canOpenNodeHandler.lastNmtStartTime = 0U;
 	node->canOpenNodeHandler.upArrivingSound = FALSE;
 	node->canOpenNodeHandler.downArrivingSound = FALSE;
 	node ->canOpenNodeHandler.specialInformation = FALSE;
@@ -186,6 +190,19 @@ void processCanOpenMessage(CAN_Message_t *msg)
 	/* Extract CANopen node ID from CAN message ID */
 	/* CANopen COB-ID to node ID mapping: lower 7 bits contain node ID */
 	uint32_t canOpenId = msg->id & 0x7F;
+	/* Local SDO, NMT, SYNC, EMCY and unknown traffic must not discover LOP nodes. */
+	if ((canOpenId == 0U) || (canOpenId == 1U) ||
+		!(((msg->id >= 0x701U) && (msg->id <= 0x77FU) && (msg->len == 1U)) ||
+		  ((msg->id >= 0x581U) && (msg->id <= 0x5FFU) && (msg->len == 8U)) ||
+		  ((msg->id >= 0x481U) && (msg->id <= 0x4FFU) && (msg->len >= 6U)))) {
+		return;
+	}
+	if ((msg->id >= 0x701U) && (msg->id <= 0x77FU)) {
+		CoFrame heartbeat = {0};
+		heartbeat.id = (uint16_t)msg->id; heartbeat.length = msg->len;
+		heartbeat.data[0] = msg->data[0];
+		if (!CoHeartbeat_Valid(&heartbeat)) { return; }
+	}
 
 	/* Search linked list for matching node ID (with mutex protection) */
 	if (xSemaphoreTake(canOpenNodesListMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
@@ -237,6 +254,9 @@ void processCanOpenMessage(CAN_Message_t *msg)
 	if (msg->id >= CAN_OPEN_HEARTBEAT_MSG_ID && msg->id <= 0x77F) {
 		/* Extract NMT state from last byte of heartbeat message */
 		current->canOpenNodeHandler.nmtState = msg->data[msg->len - 1];
+		if ((msg->data[0] == CO_NMT_INITIALIZING) || (msg->data[0] == CO_NMT_OPERATIONAL)) {
+			current->canOpenNodeHandler.nmtStartSent = FALSE;
+		}
 
 		/* Record heartbeat reception for timeout monitoring */
 		current->canOpenNodeHandler.heartbeatReceived = TRUE;
@@ -291,40 +311,4 @@ void CANOPEN_CheckHeartbeatTimeouts(void)
 	}
 
 	xSemaphoreGive(canOpenNodesListMutex);
-}
-
-/**
- * @brief Send CANopen master heartbeat message
- * 
- * Transmits a heartbeat message from the master node (node ID 1) to indicate it is alive
- * and operational. The heartbeat is sent periodically regardless of network or
- * slave node states, making it suitable for continuous operation.
- * 
- * According to CANopen CiA 301 specification:
- * - Heartbeat COB-ID: 0x701 (0x700 + master node ID 1)
- * - Heartbeat payload: 1 byte containing the master NMT state
- * - Purpose: Network monitoring and error detection
- * 
- * This function should be called periodically (e.g., every 100-500ms) from
- * the main application loop or a FreeRTOS timer callback.
- * 
- * @return None
- * @note Master heartbeat is independent of slave node states and always transmits
- * @note Master node ID is fixed to 1 for this system
- * @see CiA 301 - Heartbeat Protocol Specification
- */
-void CANOPEN_SendMasterHeartbeat(void)
-{
-	/* Master node ID is fixed to 1 for this elevator system */
-	const uint8_t MASTER_NODE_ID = 1;
-
-	/* Calculate heartbeat COB-ID (0x700 + node ID = 0x701) */
-	uint16_t heartbeatCobId = CAN_OPEN_HEARTBEAT_MSG_ID + MASTER_NODE_ID;
-
-	/* Construct heartbeat message: single byte with master NMT state */
-	/* Master is always operational to coordinate the network */
-	uint8_t heartbeatData[1] = {CO_NMT_OPERATIONAL};
-
-	/* Transmit master heartbeat */
-	protocolSend(heartbeatCobId, heartbeatData, 1, PROTOCOL_CANOPEN);
 }
