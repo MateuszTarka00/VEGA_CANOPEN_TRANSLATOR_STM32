@@ -43,6 +43,13 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define CANOPEN_TASK_DELAY_MS 			1
+#define BOOT_TRIAL_STABLE_MS             1000U
+#define BOOT_TRIAL_STARTUP_TIMEOUT_MS    5000U
+#define TASK_STARTED_TRANSCEIVER         0x01U
+#define TASK_STARTED_CANOPEN_MANAGER     0x02U
+#define TASK_STARTED_VEGA_RX             0x04U
+#define TASK_STARTED_CANOPEN_RX          0x08U
+#define TASK_STARTED_ALL                 0x0FU
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -82,6 +89,74 @@ const osThreadAttr_t CanOpenRxT_attributes = {
   .priority = (osPriority_t) osPriorityNormal1,
   .stack_size = 512 * 4
 };
+static volatile uint8_t critical_task_started;
+static volatile bool update_service_requested;
+static volatile uint8_t update_service_ready;
+
+static void updateServiceCheckpoint(uint8_t task_bit)
+{
+  for (;;) {
+    taskENTER_CRITICAL();
+    if (!update_service_requested) {
+      update_service_ready &= (uint8_t)~task_bit;
+      taskEXIT_CRITICAL();
+      return;
+    }
+    update_service_ready |= task_bit;
+    taskEXIT_CRITICAL();
+    osDelay(1U);
+  }
+}
+
+bool App_EnterUpdateService(void)
+{
+  uint32_t started = HAL_GetTick();
+  update_service_requested = true;
+  while (update_service_ready !=
+         (TASK_STARTED_TRANSCEIVER | TASK_STARTED_CANOPEN_MANAGER | TASK_STARTED_VEGA_RX)) {
+    if ((HAL_GetTick() - started) >= 1000U) {
+      update_service_requested = false;
+      return false;
+    }
+    osDelay(1U);
+  }
+  return true;
+}
+
+void App_LeaveUpdateService(void)
+{
+  update_service_requested = false;
+}
+
+static void markTaskStarted(uint8_t task_bit)
+{
+  taskENTER_CRITICAL();
+  critical_task_started |= task_bit;
+  taskEXIT_CRITICAL();
+}
+
+static bool taskIsHealthy(osThreadId_t task)
+{
+  eTaskState state;
+  if (task == NULL) {
+    return false;
+  }
+  state = eTaskGetState(task);
+  return (state == eRunning) || (state == eReady) || (state == eBlocked);
+}
+
+static bool startupSelfTestPassed(void)
+{
+  return (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) &&
+      (critical_task_started == TASK_STARTED_ALL) &&
+      taskIsHealthy(TrancieverTHandle) &&
+      taskIsHealthy(CanOpenMenagerTHandle) &&
+      taskIsHealthy(VegaRxTHandle) &&
+      taskIsHealthy(CanOpenRxTHandle) &&
+      (HAL_FDCAN_GetState(&hfdcan1) == HAL_FDCAN_STATE_BUSY) &&
+      (HAL_FDCAN_GetState(&hfdcan2) == HAL_FDCAN_STATE_BUSY) &&
+      CanopenPort_Ready();
+}
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -199,6 +274,10 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of CanOpenRxT */
   CanOpenRxTHandle = osThreadNew(canOpenRx, NULL, &CanOpenRxT_attributes);
+  if ((TrancieverTHandle == NULL) || (CanOpenMenagerTHandle == NULL) ||
+      (VegaRxTHandle == NULL) || (CanOpenRxTHandle == NULL)) {
+    Error_Handler();
+  }
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -222,9 +301,11 @@ void MX_FREERTOS_Init(void) {
 void tranciever(void *argument)
 {
   /* USER CODE BEGIN tranciever */
+  markTaskStarted(TASK_STARTED_TRANSCEIVER);
   /* Infinite loop */
   for(;;)
   {
+    updateServiceCheckpoint(TASK_STARTED_TRANSCEIVER);
     /* Transmit VEGA messages to elevator panel based on node states */
     vegaTransmitSubTask();
     
@@ -249,10 +330,12 @@ void canOpenMenager(void *argument)
 {
   /* USER CODE BEGIN canOpenMenager */
   CanOpenNodeObject* nodePtr = NULL;
+  markTaskStarted(TASK_STARTED_CANOPEN_MANAGER);
   
 	  /* Infinite loop */
 	  for(;;)
 	  {
+        updateServiceCheckpoint(TASK_STARTED_CANOPEN_MANAGER);
 		ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CANOPEN_TASK_DELAY_MS));
 		
 		TickType_t currentTime = xTaskGetTickCount();
@@ -325,10 +408,12 @@ void vegaRx(void *argument)
 {
   /* USER CODE BEGIN vegaRx */
   CAN_Message_t msg;
+  markTaskStarted(TASK_STARTED_VEGA_RX);
   
   /* Infinite loop */
   for(;;)
   {
+    updateServiceCheckpoint(TASK_STARTED_VEGA_RX);
     /* Process received VEGA messages from queue */
     if (xQueueReceive(vegaRxQueue, &msg, pdMS_TO_TICKS(100)) == pdTRUE)
     {
@@ -350,12 +435,37 @@ void vegaRx(void *argument)
 void canOpenRx(void *argument)
 {
   /* USER CODE BEGIN canOpenRx */
+  uint32_t healthy_since = 0U;
+  uint32_t trial_started_at;
+  bool trial_check_done = false;
   CanopenPort_Init();
+  markTaskStarted(TASK_STARTED_CANOPEN_RX);
+  trial_started_at = HAL_GetTick();
   /* Infinite loop */
   for(;;)
   {
 	CAN_Message_t msg;
+    bool self_test_passed;
 	CanopenPort_Poll();
+    self_test_passed = startupSelfTestPassed();
+    if (!trial_check_done && CanopenPort_TrialPending() &&
+        !self_test_passed &&
+        ((HAL_GetTick() - trial_started_at) >= BOOT_TRIAL_STARTUP_TIMEOUT_MS)) {
+      NVIC_SystemReset();
+    }
+    if (!trial_check_done && self_test_passed) {
+      uint32_t now = HAL_GetTick();
+      if (healthy_since == 0U) {
+        healthy_since = now;
+      } else if ((now - healthy_since) >= BOOT_TRIAL_STABLE_MS) {
+        if (CanopenPort_TrialPending() && !CanopenPort_ConfirmTrial()) {
+          NVIC_SystemReset();
+        }
+        trial_check_done = true;
+      }
+    } else if (!self_test_passed) {
+      healthy_since = 0U;
+    }
 	if (!CanopenPort_Ready()) {
 		osDelay(1U);
 		continue;

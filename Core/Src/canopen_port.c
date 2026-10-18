@@ -1,11 +1,14 @@
 /** @file canopen_port.c
- * @brief Single-owner STM32 integration; bootloader handoff deliberately gated.
+ * @brief Single-owner STM32 integration and explicit-update bootloader handoff.
  * Factory page is read-only; configuration/update journal is loaded separately.
  */
 #include "canopen_port.h"
 #include "canopen.h"
 #include "flash.h"
 #include <string.h>
+
+#define APP_BOOT_TX_TRIAL UINT32_C(0x500)
+#define APP_BOOT_TX_CONFIRMED UINT32_C(0x501)
 
 static Canopen gateway;
 static PsStore storage;
@@ -16,6 +19,79 @@ static uint32_t reported_timeouts[4];
 static uint8_t timeout_scan = 1U;
 static bool storage_reported;
 static bool factory_reported;
+static uint32_t handoff_tx_buffer;
+
+static bool bootInstalled(void *user)
+{
+    const volatile uint32_t *contract = (const volatile uint32_t *)UINT32_C(0x08008FE0);
+    const volatile uint32_t *vectors = (const volatile uint32_t *)UINT32_C(0x08000000);
+    static const uint32_t expected[8] = {
+        UINT32_C(0x424C4331), 2U, UINT32_C(0x08009000), UINT32_C(0x3A800),
+        UINT32_C(0x0807E800), UINT32_C(0x0807F000), UINT32_C(0x9000), 1U
+    };
+    uint32_t i;
+    (void)user;
+    if ((vectors[0] < UINT32_C(0x20000000)) ||
+        (vectors[0] > UINT32_C(0x20024000)) || ((vectors[0] & 7U) != 0U) ||
+        ((vectors[1] & 1U) == 0U) ||
+        (vectors[1] < UINT32_C(0x08000001)) ||
+        (vectors[1] >= UINT32_C(0x08008FE0))) {
+        return false;
+    }
+    for (i = 0U; i < 8U; ++i) {
+        if (contract[i] != expected[i]) { return false; }
+    }
+    return true;
+}
+
+static bool enterUpdate(void *user)
+{
+    (void)user;
+    if (CanopenPort_TrialPending()) { return false; }
+    handoff_tx_buffer = 0U;
+    return App_EnterUpdateService();
+}
+
+static void leaveUpdate(void *user)
+{
+    (void)user;
+    App_LeaveUpdateService();
+}
+
+static BootTxStatus updateAckStatus(void *user)
+{
+    (void)user;
+    if (handoff_tx_buffer == 0U) { return BOOT_TX_PENDING; }
+    if ((hfdcan1.Instance->TXBTO & handoff_tx_buffer) != 0U) {
+        return BOOT_TX_CONFIRMED;
+    }
+    if ((hfdcan1.Instance->TXBCF & handoff_tx_buffer) != 0U) {
+        return BOOT_TX_FAILED;
+    }
+    return BOOT_TX_PENDING;
+}
+
+static bool cancelUpdateAck(void *user)
+{
+    uint32_t started = HAL_GetTick();
+    (void)user;
+    if (handoff_tx_buffer == 0U) { return true; }
+    if (HAL_FDCAN_AbortTxRequest(&hfdcan1, handoff_tx_buffer) != HAL_OK) {
+        return false;
+    }
+    while (HAL_FDCAN_IsTxBufferMessagePending(&hfdcan1, handoff_tx_buffer) != 0U) {
+        if ((HAL_GetTick() - started) >= 50U) { return false; }
+        vTaskDelay(pdMS_TO_TICKS(1U));
+    }
+    handoff_tx_buffer = 0U;
+    return true;
+}
+
+static void resetForUpdate(void *user)
+{
+    (void)user;
+    NVIC_SystemReset();
+}
 
 static bool readPage(void *user, uint8_t page, uint32_t offset, uint8_t *data, uint32_t size)
 {
@@ -41,7 +117,13 @@ static bool sendFrame(void *user, const CoFrame *f)
     header.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
     header.BitRateSwitch = FDCAN_BRS_OFF; header.FDFormat = FDCAN_CLASSIC_CAN;
     header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-    return HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &header, (uint8_t *)f->data) == HAL_OK;
+    if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &header, (uint8_t *)f->data) != HAL_OK) {
+        return false;
+    }
+    if (gateway.od.handoff.state == BOOT_WAIT_ACK) {
+        handoff_tx_buffer = HAL_FDCAN_GetLatestTxFifoQRequestBuffer(&hfdcan1);
+    }
+    return true;
 }
 static uint32_t nowMs(void)
 {
@@ -53,9 +135,10 @@ void CanopenPort_Init(void)
     PsData identity = {0};
     FiData factory;
     PsIo io = {NULL, readPage, erasePage, writePage};
-    /* No installed bootloader/layout or service interlock has been validated.
-     * Do not install reset/ACK callbacks until those board contracts exist. */
-    BootHandoffPlatform boot = {0};
+    BootHandoffPlatform boot = {
+        NULL, 250000U, bootInstalled, enterUpdate, leaveUpdate,
+        updateAckStatus, cancelUpdateAck, resetForUpdate
+    };
     Ps_Init(&storage, &io);
     storage_result = Ps_Load(&storage, &identity);
     if (storage_result != PS_OK) {
@@ -75,6 +158,33 @@ bool CanopenPort_Ready(void)
 {
     return !gateway.tx_pending && (gateway.od.handoff.state != BOOT_WAIT_ACK) &&
         (gateway.od.handoff.state != BOOT_RESETTING);
+}
+
+bool CanopenPort_TrialPending(void)
+{
+    return gateway.od.identity.update_state == APP_BOOT_TX_TRIAL;
+}
+
+bool CanopenPort_ConfirmTrial(void)
+{
+    PsData candidate;
+    if (!CanopenPort_TrialPending()) {
+        return true;
+    }
+    if ((Ps_Load(&storage, &candidate) != PS_OK) ||
+        (candidate.update_state != APP_BOOT_TX_TRIAL) ||
+        (candidate.pending_slot != 1U) ||
+        (candidate.pending_version == 0U)) {
+        return false;
+    }
+    candidate.update_state = APP_BOOT_TX_CONFIRMED;
+    candidate.active_version = candidate.pending_version;
+    if (Ps_Save(&storage, &candidate) != PS_OK) {
+        return false;
+    }
+    gateway.od.identity = candidate;
+    storage_result = PS_OK;
+    return true;
 }
 
 bool CanopenPort_Receive(const CAN_Message_t *m)

@@ -45,14 +45,16 @@ _Min_Stack_Size = 0x400; /* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 144K
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 506K
+  /* Slot A: 0x08009000..0x080437FF; final 2 KiB page stores its manifest. */
+  FLASH    (rx)    : ORIGIN = 0x8009000,   LENGTH = 0x3A000
   FACTORY_ID (r)   : ORIGIN = 0x807E800,   LENGTH = 2K
   CANOPEN_NVM (r)  : ORIGIN = 0x807F000,   LENGTH = 4K
 }
 
 __canopen_nvm_start__ = ORIGIN(CANOPEN_NVM);
 __factory_identity_start__ = ORIGIN(FACTORY_ID);
-ASSERT(ORIGIN(FLASH) + LENGTH(FLASH) == ORIGIN(FACTORY_ID), "Factory boundary mismatch")
+ASSERT(ORIGIN(FLASH) == 0x08009000, "Application must be linked for slot A")
+ASSERT(ORIGIN(FLASH) + LENGTH(FLASH) == 0x08043000, "Slot A payload boundary mismatch")
 ASSERT(ORIGIN(FACTORY_ID) + LENGTH(FACTORY_ID) == ORIGIN(CANOPEN_NVM), "Factory/NVM overlap")
 
 /* Sections */

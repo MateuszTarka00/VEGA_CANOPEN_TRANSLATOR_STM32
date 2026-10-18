@@ -28,13 +28,22 @@ uint32_t Ps_Crc(const uint8_t *data, uint32_t size)
 
 bool Ps_Validate(const PsData *d)
 {
+    bool update_state_valid;
+    update_state_valid = (d != NULL) &&
+        ((d->update_state <= 8U) ||
+         ((d->update_state >= UINT32_C(0x100)) &&
+          (d->update_state < UINT32_C(0x262))) ||
+         ((d->update_state >= UINT32_C(0x300)) &&
+          (d->update_state < UINT32_C(0x462))) ||
+         (d->update_state == UINT32_C(0x500)) ||
+         (d->update_state == UINT32_C(0x501)));
     return (d != NULL) &&
         (memchr(d->device_name, '\0', PS_STRING_SIZE) != NULL) &&
         (memchr(d->hardware_version, '\0', PS_STRING_SIZE) != NULL) &&
         (memchr(d->software_version, '\0', PS_STRING_SIZE) != NULL) &&
         (d->active_slot <= 1U) &&
         ((d->pending_slot <= 1U) || (d->pending_slot == UINT32_MAX)) &&
-        (d->update_state <= 8U) && (d->boot_request <= 1U) &&
+        update_state_valid && (d->boot_request <= 1U) &&
         ((d->boot_request == 0U) ||
          ((d->boot_node_id >= 1U) && (d->boot_node_id <= 127U) &&
           (d->boot_bitrate != 0U) && (d->boot_protocol == 2U)));

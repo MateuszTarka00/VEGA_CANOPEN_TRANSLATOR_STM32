@@ -1,10 +1,12 @@
-# CANopen LOP gateway: preparation for a separate CANopen bootloader
+# CANopen LOP gateway and separate CANopen bootloader integration
 
 ## Decision and current release boundary
 
 **The bootloader, not the application, will receive and install firmware.**
 The existing application continues translating CANopen LOP <-> VEGA. It exposes
 identification/diagnostic OD and a small request-to-bootloader interface.
+The standalone bootloader project is `C:\Projects\CANOPEN_Bootloader_STM32G0`;
+it is not linked into this application.
 
 Implemented here:
 
@@ -17,20 +19,30 @@ Implemented here:
 - An application-mode / protocol-version / capability discovery interface.
 - Tests with injected storage, transport confirmation and reset callbacks.
 
-**No separate bootloader firmware is installed or built yet.** The STM32 adapter
-deliberately provides an empty `BootHandoffPlatform`. Consequently entry is
-unavailable, there is no physical reset path through this API, and no application
-Flash image is erased/programmed. Do not confuse the tested portable transition
-with an enabled board transition.
+The application linker now targets Slot A at `0x08009000`, reserves the final
+2 KiB slot page for its manifest, and relocates VTOR to the Slot-A vector table.
+It also confirms a trial image after the scheduler, both FDCAN peripherals, and
+all four critical tasks pass a 1-second stability check; failure to reach that
+state within 5 seconds resets without confirmation.
 
-The application start address is unchanged at `0x08000000`. A future bootloader
-needs its own build target, linker script, startup code and protected Flash area;
-the application must then be relinked at an agreed address. That layout change
-is explicitly outside this preparatory step.
+**The STM32 handoff backend is now connected.** It checks the installed
+bootloader vector and discovery record at `0x08008FE0`, cooperatively quiesces
+the other three translation tasks, persists the request, checks successful
+transmission of the exact FDCAN TX buffer carrying the final reply, and resets.
+Normal startup boots a valid signed application. Only an explicit update
+request enters service mode (apart from invalid-image/transaction recovery).
+There is deliberately no physical service interlock in this prototype.
+A prototype Ed25519 key pair now exists in the standalone bootloader project;
+its private half is DPAPI-protected in the developer's local profile and is
+not in source control. Signature verification is enabled. Initial sparse HEX
+generation, selective SWD commissioning/recovery and the independent PC CAN
+update client are documented in the bootloader project's `Tools/README.md`.
+This prototype key is not a production signing identity.
 
 This implementation is not a full CiA 301/302/417 conformance or MISRA claim.
 All `0x2000..` objects below are vendor specific. Actual LiftAppTool support for
-this protocol must be implemented/verified; it is not established by these tests.
+the bootloader's vendor update profile has not been verified; it is not
+established by these tests.
 
 ## Work plan
 
@@ -52,11 +64,11 @@ directory may still contain old source/object/dependency lists.
 | 1 | Keep existing LOP/VEGA translation, master NMT and remote monitoring | Preserved |
 | 2 | Remove firmware streaming/installation from application OD and build | Implemented |
 | 3 | Add versioned handoff contract and durable NVM request | Implemented |
-| 4 | Gate reset on exact successful SDO response transmission | Portable implementation + mock tests; STM32 backend disabled |
+| 4 | Gate reset on exact successful SDO response transmission | Portable tests + STM32 TX buffer status backend; hardware validation required |
 | 5 | Verify migration, interrupted writes, ACK ordering, failures and ARM build | Automated validation |
-| 6 | Choose image/recovery storage, linker addresses, signatures and service interlock | Required before physical bootloader |
-| 7 | Build minimal independent CANopen bootloader; integrate real STM32 callbacks | Next implementation stage |
-| 8 | Power-cut, watchdog, bus-off, LiftAppTool and LOP regression bench testing | Hardware required before enablement |
+| 6 | Choose image/recovery storage, linker addresses, signatures and service entry | 36 KiB bootloader, 232 KiB payload per slot, signed manifest; explicit command, no physical interlock |
+| 7 | Build minimal independent CANopen bootloader; integrate real STM32 callbacks | Standalone target implemented; target/hardware qualification remains |
+| 8 | Power-cut, watchdog, bus-off, LiftAppTool and LOP regression bench testing | Hardware qualification remains |
 
 ## Architecture and ownership
 
@@ -69,8 +81,8 @@ flowchart LR
     LOP <--> VEGA[Existing VEGA application / FDCAN2]
     LOCAL --> HANDOFF[bootloader_handoff]
     HANDOFF --> JOURNAL[persistent_storage: dual-page request]
-    HANDOFF --> PORT[Injected board interlock / exact TX status / reset]
-    PORT -.->|only after actual installation is verified| BOOT[Independent future bootloader]
+    HANDOFF --> PORT[Cooperative task quiescence / exact TX status / reset]
+    PORT -->|explicit update request| BOOT[Independent bootloader project]
     BOOT -.->|SDO image download, validation, install| IMAGE[Main firmware image]
 ```
 
@@ -81,10 +93,12 @@ EMCY also uses the OD; heartbeat/NMT wire helpers only use portable frame types.
 No module receives an image in this application anymore.
 
 All local OD/SDO/handoff/NVM operations run in `CanOpenRxT`, not an ISR.
-The current STM32 adapter has no boot platform callbacks, so normal translation
-continues as before. The future `enterService` implementation MUST coordinate all
-existing transmit/translation tasks, authorize the maintenance outage and keep
-the physical system in its externally established service condition.
+The STM32 adapter now supplies the boot platform callbacks. Normal translation
+continues until an explicit service request. The three other translation tasks
+acknowledge quiescence at outer-loop boundaries without holding their mutexes.
+Entry fails if all three do not acknowledge within 1000 ms.
+Entry is also refused while the running image is an unconfirmed trial.
+This is operator-authorized bench downtime, not a physical safety condition.
 No code here assumes that an NMT Stop or a software flag makes a lift safe.
 
 CANopen queues, mutex and remote-node pool are statically allocated. This does
@@ -121,7 +135,7 @@ is enabled for local OD entries.
 | 2006 | 0 | Running application's numeric version from firmware | U32 | RO | Vendor |
 | 2007 | 0 | Application handoff result | U8 | RO | Vendor, protocol 2 |
 | 2009 | 0 | Handoff protocol version = 2 | U32 | RO | Vendor |
-| 200A | 0 | Execution mode: 0 = application; future bootloader must report 1 | U8 | RO | Vendor |
+| 200A | 0 | Execution mode: 0 = application; bootloader reports 1 | U8 | RO | Vendor |
 | 200B | 0 | Entry capability: 1 only if all backend checks/hooks are present | U8 | RO | Vendor |
 
 **Removed from application:** `0x2002` firmware data, `0x2003` expected CRC,
@@ -168,10 +182,10 @@ debug access, malicious firmware or a full-chip erase.
 sequenceDiagram
     participant T as LiftAppTool
     participant A as Application SDO server
-    participant S as Platform service interlock
+    participant S as Cooperative service coordination
     participant N as NVM journal
     participant C as CAN TX completion
-    participant B as Future bootloader
+    participant B as Separate bootloader
     T->>A: Read 2009=2, 200A=0, 200B capability
     T->>A: Write 2000:0 = 1
     A->>S: Verify installed bootloader and authorize/quiesce service
@@ -182,8 +196,8 @@ sequenceDiagram
     Note over A,C: Queue acceptance is NOT transmission confirmation
     C-->>A: Exact reply transmitted, or failure/timeout
     A->>A: Platform system reset only after confirmed transmission
-    A->>B: Reset path (requires future bootloader installation)
-    Note over B: Future: latch/consume request, start minimal CANopen
+    A->>B: Reset path (not enabled by the current board adapter)
+    Note over B: Separate target: CANopen recovery/update profile
     B-->>T: Boot-Up, then mode=1 / identity
     T->>B: New SDO session for firmware download
 ```
@@ -205,7 +219,7 @@ On timeout/TX failure, any queued response must be retired through `cancelAck`,
 then the committed request is cleared before leaving service. If a response has
 not even been queued, it is replaced by an SDO abort rather than sent later as
 a stale success. If NVM clearance or TX retirement cannot be proved, the state
-stays FAILED/RECOVERY_REQUIRED and the service interlock is NOT released.
+stays FAILED/RECOVERY_REQUIRED and the tasks are NOT resumed.
 The tool can read diagnostics and write `2000=0` to retry cleanup.
 
 An NVM operation can fail after its commit reached Flash. Cleanup therefore
@@ -213,7 +227,7 @@ reloads the journal instead of trusting the last RAM snapshot. A reset callback
 which returns is also treated as a fault, not as successful entry.
 
 **Power-loss window:** once UPDATE is committed, a power failure may enter the
-future bootloader even if the tool never received the SDO reply. This must be
+separate bootloader even if the tool never received the SDO reply. This must be
 safe: UPDATE means "enter maintenance receiver", NEVER "erase/install an image".
 The tool must rediscover mode after any ambiguous timeout. CAN ACK proves bus
 transmission, not that LiftAppTool's process consumed the reply.
@@ -222,7 +236,7 @@ If the application starts and still sees UPDATE, it reports RECOVERY_REQUIRED
 and does NOT auto-reset; this prevents a boot loop when the bootloader has not
 consumed the request.
 
-## Board callbacks: deliberately NOT connected yet
+## Board callbacks: STM32 backend connected
 
 `BootHandoffPlatform` is a small contract, not a bootloader implementation:
 
@@ -230,31 +244,36 @@ consumed the request.
 |---|---|
 | `installed` | Verify actual installed/protected bootloader, agreed entry/layout and protocol, not just a compile-time bool |
 | `bitrate` | Exact CANopen bus bitrate inherited by bootloader; same node ID is stored |
-| `enterService` | Authorize downtime, quiesce all LOP/VEGA transmit tasks, retain interlock across transition |
+| `enterService` | Explicit request authorizes downtime; cooperatively quiesce other tasks |
 | `leaveService` | Resume only after failed request is safely cleared |
 | `ackStatus` | Confirm THIS final SDO reply; bus-off/abort must not count as success |
 | `cancelAck` | Idempotently retire/abort this reply on failure; report inability to prove retirement |
 | `reset` | Execute system reset; never return, never jump directly to a guessed address |
 
-Future FDCAN adapter should mark the entry reply with a unique message marker
-and request a TX event. Match the actual TX event to that marker and the reply.
-Serialize TX setup with other producers, handle event FIFO loss/overflow,
-bus-off and cancellation, and prevent marker reuse until retirement. Neither
+The FDCAN adapter records `HAL_FDCAN_GetLatestTxFifoQRequestBuffer` immediately
+after queuing the final response. Other producers are already quiescent.
+`TXBTO` must confirm that exact buffer; `TXBCF` detects cancellation.
+Failure cancellation aborts that buffer and waits at most 50 ms for retirement.
+Neither
 `HAL_FDCAN_AddMessageToTxFifoQ == HAL_OK`, an empty TX FIFO, a delay nor a cleared
 pending bit alone proves successful transmission of this exact response.
 Do not use the ordinary `CoSend` queue-acceptance result as that proof.
 
-This stage intentionally does not install a reset callback or guess an external
-lift service interlock. Physical entry remains blocked until the independent
-bootloader and these callbacks are implemented and tested together.
+The reset callback calls `NVIC_SystemReset`; no direct jump from RTOS context
+is used. A physical lift service interlock is deliberately absent per prototype
+scope. CAN access is trusted; the service command is not authenticated. Validate
+TX correlation, bus-off/cancellation and all task quiescence on a controlled bench.
 
 ## Flash / persistent handoff ABI
 
-Current map (factory reservation reduces maximum application size by 2 KiB):
+Current shared map (old 32 KiB bootloader layout is obsolete):
 
 | Addresses | Size | Role |
 |---|---:|---|
-| 08000000..0807E7FF | 506 KiB | Existing application |
+| 08000000..08008FFF | 36 KiB | Independent signed bootloader |
+| 08009000..080437FF | 234 KiB | Slot A, final 2 KiB page is manifest |
+| 08043800..0807DFFF | 234 KiB | Slot B, final 2 KiB page is manifest |
+| 0807E000..0807E7FF | 2 KiB | Restartable swap scratch |
 | 0807E800..0807EFFF | 2 KiB | Factory identity, excluded from firmware images |
 | 0807F000..0807F7FF | 2 KiB | Journal page 0 |
 | 0807F800..0807FFFF | 2 KiB | Journal page 1 |
@@ -346,9 +365,9 @@ SDO write to `0x1017` initializes its heartbeat setting). Factory provisioning
 does not initialize or overwrite the update journal. Handoff requires a valid
 committed journal as well as valid factory identity.
 
-Future bootloader integration requirements:
+Separate bootloader implementation and remaining qualification:
 
-1. Reserve the identical factory/NVM addresses in its own linker script; use the
+1. Reserve the identical factory/NVM addresses in its linker script; use the
    shared decoder and validate the record on every startup.
 2. Keep recovery communication available on missing/corrupt identity, but refuse
    application erase/program/activation until hardware identity is established.
@@ -358,7 +377,7 @@ Future bootloader integration requirements:
    out-of-range revision must be rejected **before erase**. HW revision numeric
    encoding is major[31:16], minor[15:0]. CRC alone is not image authenticity.
 4. Bound **every** image write and entire erase-page range with
-   `Fi_ApplicationRange`, then further exclude the future bootloader's protected
+   `Fi_ApplicationRange`, then further exclude the bootloader's protected
    area and enforce the final application load address. The helper currently
    allows 0x08000000..0x0807E7FF; it is not a complete bootloader memory policy.
    Backup/staging areas also must never overlap factory or journal pages.
@@ -366,18 +385,20 @@ Future bootloader integration requirements:
    exposing its own firmware name/version and execution mode 1. Never copy pending
    image version into application OD. Mark confirmed metadata only after self-test.
 
-There is still no bootloader target or image installer in this application.
-These shared APIs/ABI and reserved regions prepare it; they do not claim a
-validated physical update/rollback path or hardware tamper resistance.
+The independent bootloader target and image installer now exist in
+`CANOPEN_Bootloader_STM32G0`. It uses a durable A/B page-swap/trial/rollback
+transaction. The application does not contain that installer. This design and
+implementation do not yet establish a production-qualified physical update
+path or hardware tamper resistance: the installed prototype key is not an
+approved production identity, generated factory files still need physical
+programming, and the now-enabled STM32 handoff backend needs bench qualification.
 
-## Future independent bootloader responsibilities
+## Independent bootloader and remaining qualification
 
-Use a separate ELF/BIN target in the same repository, without VEGA/LOP or the
-master's automatic remote-node start behavior. A minimal cooperative loop can
-avoid FreeRTOS. Share portable types/CRC/NVM serialization deliberately, not
-application globals or the entire STM32 gateway adapter.
-
-Required functionality:
+The separate ELF target has no VEGA/LOP dependency or automatic remote-node
+start role and uses a cooperative loop. It implements the CANopen recovery,
+manifest, update, and restartable transaction paths. Hardware and
+interoperability qualification remain required:
 
 1. Verify the request journal; validate node/bitrate/protocol against supported
    bus settings. Latch/consume UPDATE safely, then expose mode 1.
@@ -397,7 +418,7 @@ Required functionality:
 
 ```mermaid
 flowchart TD
-    R[Future bootloader reset] --> J[Load/validate journal and image]
+    R[Separate bootloader reset] --> J[Load/validate journal and image]
     J --> U{UPDATE request or invalid application?}
     U -->|No| A[Validated main application]
     U -->|Yes| L[Latch/consume maintenance request]
@@ -409,13 +430,11 @@ flowchart TD
     D -->|timeout/power loss| REC[Recover receiver or confirmed image per defined policy]
 ```
 
-Before coding the real bootloader, fix its protected address range, application
-vector relocation, maximum image size, external/internal backup strategy and
-the linker/startup changes. A/B execution requires correct address mapping;
-arbitrary copies of one BIN do not run from arbitrary slots.
-The image protocol in bootloader mode is not implemented by this application.
-Decide whether to use CiA 302-3 download services or a separately versioned vendor
-protocol based on the actual LiftAppTool implementation.
+The protected range, vector relocation, image limit, A/B scratch strategy, and
+linker/startup layout are defined in the standalone project. Slot B images are
+linked for Slot A and page-swapped before execution; they are not executed in
+place. The bootloader uses a versioned vendor SDO profile; LiftAppTool
+compatibility and any CiA 302-3 interoperability remain to be validated.
 
 ## LiftAppTool frame sequence
 
@@ -433,9 +452,9 @@ Node 1: standard Classic CAN data frames, SDO request 601, reply 581, DLC 8.
 | App with valid factory record, no backend -> tool | 581 | 80 00 20 00 22 00 00 08 | State abort; NO reset |
 | App without valid factory record -> tool | 581 | 80 00 20 00 00 00 06 06 | Hardware abort; NO reset |
 | Future enabled app -> tool | 581 | 60 00 20 00 00 00 00 00 | Durable entry request accepted |
-| Future bootloader -> network | 701 | 00 (DLC 1) | Boot-Up after reset |
+| Bootloader -> network | 701 | 00 (DLC 1) | Boot-Up after reset |
 | Tool -> bootloader | 601 | 40 0A 20 00 00 00 00 00 | Confirm execution mode |
-| Future bootloader -> tool | 581 | 4F 0A 20 00 01 00 00 00 | Required mode 1 |
+| Bootloader -> tool | 581 | 4F 0A 20 00 01 00 00 00 | Required mode 1 |
 
 The final four lines are an integration contract, not current hardware behavior.
 Wait for mode 1 with a bounded timeout; a generic heartbeat or CAN ACK does not
@@ -471,7 +490,7 @@ Automated coverage:
 - No reset before durable request AND final response queueing AND exact TX proof.
 - Returning reset callback treated as failure.
 - TX failure/deadline across timer wrap; durable clear before service release.
-- Failed TX retirement / failed clear retains interlock; explicit recovery.
+- Failed TX retirement / failed clear retains task quiescence; explicit recovery.
 - Unconsumed request on application startup does not cause reset loops.
 - Expedited and segmented entry commands; no side effect on initiate-only ACK.
 - Identity/heartbeat/EMCY regression and exact device-name CAN payloads.

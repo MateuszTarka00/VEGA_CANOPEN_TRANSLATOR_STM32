@@ -359,11 +359,10 @@ static void testSdoAndCore(void)
     uint8_t i;
     uint32_t rng = 1U, j;
     static const uint16_t removed[] = {0x2002U, 0x2003U, 0x2004U, 0x2005U, 0x2008U};
-    static const uint8_t expected[4][8] = {
+    static const uint8_t expected[3][8] = {
         {0x00,0x56,0x45,0x47,0x41,0x20,0x43,0x41},
-        {0x10,0x4E,0x6F,0x70,0x65,0x6E,0x20,0x4C},
-        {0x00,0x4F,0x50,0x20,0x67,0x61,0x74,0x65},
-        {0x19,0x77,0x61,0x79,0x00,0x00,0x00,0x00}
+        {0x10,0x4E,0x6F,0x70,0x65,0x6E,0x20,0x67},
+        {0x03,0x61,0x74,0x65,0x77,0x61,0x79,0x00}
     };
     commissioned(&memory, &store, &d);
     assert(!Co_Init(&c, 0U, send, &sender, &d, &store, &factory, NULL, 0U));
@@ -373,8 +372,8 @@ static void testSdoAndCore(void)
     Co_Poll(&c, 1000U); assert(sender.count == 2U && sender.last.data[0] == 5U);
     s = &c.sdo;
     q = request(0x40U, 0x1008U, 0U);
-    assert(CoSdo_Receive(s, &q, 0U, &r) && Co_Get32(&r.data[4]) == 24U);
-    for (i = 0U; i < 4U; ++i) {
+    assert(CoSdo_Receive(s, &q, 0U, &r) && Co_Get32(&r.data[4]) == 20U);
+    for (i = 0U; i < 3U; ++i) {
         q = request((uint8_t)(0x60U | ((i & 1U) << 4U)), 0U, 0U);
         assert(CoSdo_Receive(s, &q, i + 1U, &r));
         assert(memcmp(r.data, expected[i], 8U) == 0);
