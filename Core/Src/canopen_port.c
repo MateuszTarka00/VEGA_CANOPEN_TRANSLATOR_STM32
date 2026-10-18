@@ -23,11 +23,11 @@ static uint32_t handoff_tx_buffer;
 
 static bool bootInstalled(void *user)
 {
-    const volatile uint32_t *contract = (const volatile uint32_t *)UINT32_C(0x08008FE0);
+    const volatile uint32_t *contract = (const volatile uint32_t *)DEVICE_BOOT_CONTRACT;
     const volatile uint32_t *vectors = (const volatile uint32_t *)UINT32_C(0x08000000);
     static const uint32_t expected[8] = {
-        UINT32_C(0x424C4331), 2U, UINT32_C(0x08009000), UINT32_C(0x3A800),
-        UINT32_C(0x0807E800), UINT32_C(0x0807F000), UINT32_C(0x9000), 1U
+        UINT32_C(0x424C4331), 2U, DEVICE_SLOT_A_START, DEVICE_SLOT_SIZE,
+        DEVICE_FACTORY_START, DEVICE_NVM_START, DEVICE_BOOT_SIZE, 1U
     };
     uint32_t i;
     (void)user;

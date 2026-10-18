@@ -118,9 +118,9 @@ static void testFactory(void)
     image.product_code--; image.vendor_id++; assert(!Fi_Compatible(&factory, &image));
     image.vendor_id--; assert(!Fi_Compatible(&invalid, &image));
     assert(!Fi_Compatible(NULL, &image) && !Fi_Compatible(&factory, NULL));
-    assert(Fi_ApplicationRange(FI_APPLICATION_START, 506U * 1024U));
+    assert(Fi_ApplicationRange(FI_APPLICATION_START, 250U * 1024U));
     assert(Fi_ApplicationRange(FI_FLASH_ADDRESS - FI_PAGE_SIZE, FI_PAGE_SIZE));
-    assert(!Fi_ApplicationRange(FI_APPLICATION_START, 506U * 1024U + 1U));
+    assert(!Fi_ApplicationRange(FI_APPLICATION_START, 250U * 1024U + 1U));
     assert(!Fi_ApplicationRange(FI_FLASH_ADDRESS, 1U));
     assert(!Fi_ApplicationRange(FI_FLASH_ADDRESS - 1U, 2U));
     assert(!Fi_ApplicationRange(FI_NVM_ADDRESS, FI_PAGE_SIZE));

@@ -66,7 +66,7 @@ directory may still contain old source/object/dependency lists.
 | 3 | Add versioned handoff contract and durable NVM request | Implemented |
 | 4 | Gate reset on exact successful SDO response transmission | Portable tests + STM32 TX buffer status backend; hardware validation required |
 | 5 | Verify migration, interrupted writes, ACK ordering, failures and ARM build | Automated validation |
-| 6 | Choose image/recovery storage, linker addresses, signatures and service entry | 36 KiB bootloader, 232 KiB payload per slot, signed manifest; explicit command, no physical interlock |
+| 6 | Choose image/recovery storage, linker addresses, signatures and service entry | STM32G0B1RCT6: 36 KiB bootloader, 104 KiB payload per slot, signed manifest; explicit command, no physical interlock |
 | 7 | Build minimal independent CANopen bootloader; integrate real STM32 callbacks | Standalone target implemented; target/hardware qualification remains |
 | 8 | Power-cut, watchdog, bus-off, LiftAppTool and LOP regression bench testing | Hardware qualification remains |
 
@@ -266,17 +266,19 @@ TX correlation, bus-off/cancellation and all task quiescence on a controlled ben
 
 ## Flash / persistent handoff ABI
 
-Current shared map (old 32 KiB bootloader layout is obsolete):
+Current shared map for STM32G0B1RCT6: 256 KiB Flash, 144 KiB RAM.
+Both configurations select `STM32G0B1RCTx` and `STM32G0B1RCTX_FLASH.ld`.
+Old VETX/512 KiB maps are obsolete and must not be used on this board.
 
 | Addresses | Size | Role |
 |---|---:|---|
 | 08000000..08008FFF | 36 KiB | Independent signed bootloader |
-| 08009000..080437FF | 234 KiB | Slot A, final 2 KiB page is manifest |
-| 08043800..0807DFFF | 234 KiB | Slot B, final 2 KiB page is manifest |
-| 0807E000..0807E7FF | 2 KiB | Restartable swap scratch |
-| 0807E800..0807EFFF | 2 KiB | Factory identity, excluded from firmware images |
-| 0807F000..0807F7FF | 2 KiB | Journal page 0 |
-| 0807F800..0807FFFF | 2 KiB | Journal page 1 |
+| 08009000..080237FF | 106 KiB | Slot A, final 2 KiB page is manifest |
+| 08023800..0803DFFF | 106 KiB | Slot B, final 2 KiB page is manifest |
+| 0803E000..0803E7FF | 2 KiB | Restartable swap scratch |
+| 0803E800..0803EFFF | 2 KiB | Factory identity, excluded from firmware images |
+| 0803F000..0803F7FF | 2 KiB | Journal page 0 |
+| 0803F800..0803FFFF | 2 KiB | Journal page 1 |
 | 20000000..20023FFF | 144 KiB | RAM |
 
 The Flash adapter bounds access to the two reserved pages and checks actual
@@ -287,8 +289,20 @@ ELF/BIN output does not contain a factory record.
 Full-chip erase by a programmer still destroys identity and requests. Programmer
 settings must use selective sector/page erase; linker reservations cannot prevent
 mass erase. Hardware WRP option-byte protection is a production decision requiring
-board validation (factory page is bank 2 page 125 for normal 512-KiB dual-bank mode).
+board validation (factory is page 125 in single-bank mode, bank 2 page 61 in
+normal 256-KiB dual-bank mode).
 No option bytes are changed by this implementation.
+
+The identical `device_memory.h` in both repositories defines this contract.
+The application payload limit is 104 KiB; its manifest starts at `0x08023000`.
+The discovery record at `0x08008FE0` checks the new slot size and metadata
+addresses before handoff. Journal swap states cover 53 pages / 159 phases.
+The Flash adapter checks actual capacity, page geometry and unswapped banks
+on reads AND writes. Erase page numbers come from the shared bank-aware planner.
+Bootloader multi-page erases split at the actual bank boundary.
+Existing packages/factory HEX must be regenerated; reprogram the bootloader
+through SWD and commission a clean journal. The old factory address
+`0x0807E800` does not exist on RCT6.
 
 Each page contains one 256-byte serialized record:
 
@@ -353,7 +367,7 @@ gcc -std=c99 -Wall -Wextra -Werror -ICore\Inc Tools\factory_identity_tool.c Core
 ```
 
 The generator validates fields and creates exactly 128 bytes. It does not flash
-the MCU and does not allocate manufacturer identifiers. Program at **0x0807E800**
+the MCU and does not allocate manufacturer identifiers. Program at **0x0803E800**
 using SWD/ST-LINK in manufacturing, with an explicit erase of only the factory
 page. Program bytes 0..119 first, then the final doubleword 120..127 (CRC+commit);
 read back and run the same decoder before releasing the device. Do not overwrite
@@ -379,7 +393,7 @@ Separate bootloader implementation and remaining qualification:
 4. Bound **every** image write and entire erase-page range with
    `Fi_ApplicationRange`, then further exclude the bootloader's protected
    area and enforce the final application load address. The helper currently
-   allows 0x08000000..0x0807E7FF; it is not a complete bootloader memory policy.
+   allows 0x08000000..0x0803E7FF; it is not a complete bootloader memory policy.
    Backup/staging areas also must never overlap factory or journal pages.
 5. Expose the same factory hardware/product/serial through bootloader OD, while
    exposing its own firmware name/version and execution mode 1. Never copy pending
