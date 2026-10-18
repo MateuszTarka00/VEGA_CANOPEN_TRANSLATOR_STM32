@@ -242,7 +242,7 @@ static void resetBoard(void *u)
     assert(b->service && b->tx == BOOT_TX_CONFIRMED);
     assert(Ps_Load(b->store, &d) == PS_OK);
     b->reset_saw_request = d.boot_request == BOOT_REQUEST_UPDATE &&
-        d.boot_node_id == 1U && d.boot_bitrate == 250000U && d.boot_protocol == 2U;
+        d.boot_node_id == 126U && d.boot_bitrate == 250000U && d.boot_protocol == 2U;
     b->reset_count++;
     /* Returning is intentionally a fault; real platform reset must not return. */
 }

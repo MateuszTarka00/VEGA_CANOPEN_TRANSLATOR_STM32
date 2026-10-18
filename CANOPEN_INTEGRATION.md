@@ -243,7 +243,7 @@ consumed the request.
 | Callback / field | Requirement before enabling |
 |---|---|
 | `installed` | Verify actual installed/protected bootloader, agreed entry/layout and protocol, not just a compile-time bool |
-| `bitrate` | Exact CANopen bus bitrate inherited by bootloader; same node ID is stored |
+| `bitrate` | Exact CANopen bus bitrate inherited by bootloader; bootloader Node-ID 126 is stored |
 | `enterService` | Explicit request authorizes downtime; cooperatively quiesce other tasks |
 | `leaveService` | Resume only after failed request is safely cleared |
 | `ackStatus` | Confirm THIS final SDO reply; bus-off/abort must not count as success |
@@ -450,7 +450,7 @@ linked for Slot A and page-swapped before execution; they are not executed in
 place. The bootloader uses a versioned vendor SDO profile; LiftAppTool
 compatibility and any CiA 302-3 interoperability remain to be validated.
 
-## LiftAppTool frame sequence
+## Vendor client frame sequence (not a captured LiftAppTool sequence)
 
 Node 1: standard Classic CAN data frames, SDO request 601, reply 581, DLC 8.
 
@@ -466,14 +466,22 @@ Node 1: standard Classic CAN data frames, SDO request 601, reply 581, DLC 8.
 | App with valid factory record, no backend -> tool | 581 | 80 00 20 00 22 00 00 08 | State abort; NO reset |
 | App without valid factory record -> tool | 581 | 80 00 20 00 00 00 06 06 | Hardware abort; NO reset |
 | Future enabled app -> tool | 581 | 60 00 20 00 00 00 00 00 | Durable entry request accepted |
-| Bootloader -> network | 701 | 00 (DLC 1) | Boot-Up after reset |
-| Tool -> bootloader | 601 | 40 0A 20 00 00 00 00 00 | Confirm execution mode |
-| Bootloader -> tool | 581 | 4F 0A 20 00 01 00 00 00 | Required mode 1 |
+| Bootloader -> network | 77E | 00 (DLC 1) | Boot-Up at Node 126 after reset |
+| Tool -> bootloader | 67E | 40 0A 20 00 00 00 00 00 | Confirm execution mode |
+| Bootloader -> tool | 5FE | 4F 0A 20 00 01 00 00 00 | Required mode 1 |
 
 The final four lines are an integration contract, not current hardware behavior.
 Wait for mode 1 with a bounded timeout; a generic heartbeat or CAN ACK does not
 identify a bootloader. End any pre-reset segmented SDO session. Start a NEW
 session for firmware reception only after confirming the bootloader.
+The bootloader now uses Node 126 for recovery and update, including older
+handoff records. The application keeps its normal Node-ID. Manual page 16 and
+the actual LiftAppTool trace confirm the reserved bootloader address; page 28
+shows block download to `0x1F50:01`. The bootloader implements this data alias
+and bounded block download, but still requires the signed manifest and vendor
+begin/verify/activate commands. Password/control and file-format compatibility
+with the wizard remain unverified. Do not interpret ordinary NMT reset as an
+authorized firmware-update request.
 
 Unchanged identity requests:
 `40 08 10 00 00 00 00 00` name,

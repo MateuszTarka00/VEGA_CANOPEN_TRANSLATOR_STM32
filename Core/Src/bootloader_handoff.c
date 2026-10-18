@@ -3,6 +3,7 @@
  * Failures reconcile the journal before resuming application operation.
  */
 #include "bootloader_handoff.h"
+#include "device_memory.h"
 #include <string.h>
 
 bool BootHandoff_Available(const BootHandoff *h)
@@ -87,7 +88,7 @@ uint32_t BootHandoff_Request(BootHandoff *h, uint32_t now)
     }
     h->service = true;
     candidate.boot_request = BOOT_REQUEST_UPDATE;
-    candidate.boot_node_id = h->node_id;
+    candidate.boot_node_id = DEVICE_BOOT_NODE_ID;
     candidate.boot_bitrate = h->platform.bitrate;
     candidate.boot_protocol = BOOT_HANDOFF_PROTOCOL;
     if (Ps_Save(h->store, &candidate) != PS_OK) {
