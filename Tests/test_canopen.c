@@ -239,9 +239,11 @@ static void resetBoard(void *u)
 {
     Board *b = u;
     PsData d;
-    assert(b->service && b->tx == BOOT_TX_CONFIRMED);
     assert(Ps_Load(b->store, &d) == PS_OK);
-    b->reset_saw_request = d.boot_request == BOOT_REQUEST_UPDATE &&
+    assert(b->service && ((b->tx == BOOT_TX_CONFIRMED) ||
+                         (d.boot_request == BOOT_REQUEST_DISCOVERY)));
+    b->reset_saw_request = (d.boot_request == BOOT_REQUEST_UPDATE ||
+                           d.boot_request == BOOT_REQUEST_DISCOVERY) &&
         d.boot_node_id == 126U && d.boot_bitrate == 250000U && d.boot_protocol == 2U;
     b->reset_count++;
     /* Returning is intentionally a fault; real platform reset must not return. */
@@ -253,6 +255,7 @@ static BootHandoffPlatform boardInit(Board *b, PsStore *s, Memory *m)
     p.user = b; p.bitrate = 250000U; p.installed = installed;
     p.enterService = enterService; p.leaveService = leaveService;
     p.ackStatus = txStatus; p.cancelAck = cancelAck; p.reset = resetBoard;
+    p.discoveryInstalled = installed;
     return p;
 }
 static void setupHandoff(BootHandoff *h, Board *b, PsStore *s, Memory *m, PsData *d)
@@ -346,6 +349,64 @@ static bool send(void *u, const CoFrame *f)
     Sender *s = u;
     if (s->fail) { return false; }
     s->last = *f; s->count++; return true;
+}
+
+static void testNmtDiscovery(void)
+{
+    Memory m;
+    PsStore s;
+    PsData d, loaded;
+    Board b;
+    BootHandoffPlatform p;
+    Canopen c;
+    Sender sender;
+    CoFrame q = {0};
+    uint32_t scenario;
+    for (scenario = 0U; scenario < 15U; ++scenario) {
+        commissioned(&m, &s, &d);
+        p = boardInit(&b, &s, &m);
+        memset(&sender, 0, sizeof(sender));
+        assert(Co_Init(&c, 1U, send, &sender, &d, &s, &factory, &p, 0U));
+        Co_Poll(&c, 0U);
+        q.id = 0U; q.length = 2U; q.data[0] = 0x81U; q.data[1] = 1U;
+        switch (scenario) {
+        case 1U: q.data[1] = 0U; break;
+        case 2U: q.data[1] = 2U; break;
+        case 3U: q.length = 1U; break;
+        case 4U: q.length = 3U; break;
+        case 5U: q.data[0] = 0x82U; break;
+        case 6U: c.tx_pending = true; break;
+        case 7U: c.sdo.state = SDO_UPLOAD; break;
+        case 8U: c.od.factory_valid = false; break;
+        case 9U: c.od.handoff.platform.discoveryInstalled = NULL; break;
+        case 10U: b.installed = false; break;
+        case 11U: b.deny_service = true; break;
+        case 12U: m.erase_error = true; break;
+        case 13U: d.update_state = UINT32_C(0x500);
+                  assert(Ps_Save(&s, &d) == PS_OK); break;
+        case 14U: d.update_state = UINT32_C(0x501);
+                  assert(Ps_Save(&s, &d) == PS_OK); break;
+        default: break;
+        }
+        (void)Co_Receive(&c, &q, 3300U);
+        if (scenario == 0U || scenario == 14U) {
+            assert(b.reset_count == 1U && b.reset_saw_request);
+            assert(c.od.handoff.result == BOOT_RESULT_RESET_RETURNED);
+            assert(!c.od.handoff.ack_queued && b.cancel_count == 0U);
+            assert(c.tx_pending && c.pending.id == 0x81U); /* EMCY on returned reset. */
+        } else { assert(b.reset_count == 0U); }
+        assert(sender.count == 1U); /* NMT never produces an SDO response. */
+        assert(Ps_Load(&s, &loaded) == PS_OK && loaded.boot_request == 0U);
+        assert(!b.service);
+    }
+    /* Committed-but-unconfirmed write must reconcile before leaving service. */
+    commissioned(&m, &s, &d); p = boardInit(&b, &s, &m);
+    b.fail_commit_on_entry = true;
+    BootHandoff_Init(&c.od.handoff, &p, &s, &d, 1U);
+    assert(BootHandoff_RequestDiscovery(&c.od.handoff, 0U) == CO_ABORT_HARDWARE);
+    assert(!b.service && b.reset_count == 0U);
+    assert(Ps_Load(&s, &loaded) == PS_OK && loaded.boot_request == 0U);
+    puts("NMT discovery: addressed-only, no ACK, durable service, capability/trial/IO gates OK");
 }
 static void testSdoAndCore(void)
 {
@@ -508,6 +569,7 @@ static void testEndToEnd(void)
 }
 int main(void)
 {
+    testNmtDiscovery();
     testFactory(); testStorage(); testHandoff(); testSdoAndCore(); testEndToEnd();
     puts("All application CANopen / bootloader handoff tests passed.");
     return 0;

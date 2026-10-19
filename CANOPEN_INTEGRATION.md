@@ -29,8 +29,9 @@ state within 5 seconds resets without confirmation.
 bootloader vector and discovery record at `0x08008FE0`, cooperatively quiesces
 the other three translation tasks, persists the request, checks successful
 transmission of the exact FDCAN TX buffer carrying the final reply, and resets.
-Normal startup boots a valid signed application. Only an explicit update
-request enters service mode (apart from invalid-image/transaction recovery).
+Normal startup boots a valid signed application. An explicit SDO update
+request enters service mode; application 0.1.1 also implements the bounded,
+addressed NMT discovery policy below (apart from invalid-image/transaction recovery).
 There is deliberately no physical service interlock in this prototype.
 A prototype Ed25519 key pair now exists in the standalone bootloader project;
 its private half is DPAPI-protected in the developer's local profile and is
@@ -40,9 +41,37 @@ update client are documented in the bootloader project's `Tools/README.md`.
 This prototype key is not a production signing identity.
 
 This implementation is not a full CiA 301/302/417 conformance or MISRA claim.
-All `0x2000..` objects below are vendor specific. Actual LiftAppTool support for
-the bootloader's vendor update profile has not been verified; it is not
-established by these tests.
+All `0x2000..` objects below are vendor specific. The first LiftAppTool transfer, activation and application launch were confirmed
+on hardware with bootloader 1.0.5. Repeated entry through the new NMT discovery
+policy is native-tested/ARM-built but still requires hardware verification.
+
+### Application 0.1.1: addressed NMT Reset Node discovery
+
+Only `0x000`, DLC 2, `81 01` (local Node 1) requests a five-second bootloader
+window. Broadcast resets, other nodes and Reset Communication retain their
+previous behavior. The local dispatcher requires no pending TX/SDO transfer,
+valid factory identity, IDLE/CONFIRMED journal, successful existing service
+quiescence and an installed bootloader advertising capability bit 1.
+Trial images cannot request this transition. The existing journal records
+`boot_request=2`, Node 126, 250 kbit/s, protocol 2; no SDO reply is fabricated.
+Reset happens only after successful persistence. Save/reset failures use the
+same reconciliation and service-interlock retention as vendor handoff.
+
+Bootloader 1.0.6 consumes this request once, waits 5000 ms for a successful
+local SDO exchange, then returns to a valid idle application if none arrives.
+A successful exchange retains service mode for the update. An ordinary power-on
+has no delay. This is an explicit vendor policy, not general CiA NMT semantics.
+There is no physical safety authorization: use a controlled bench.
+
+The final word of the boot contract is now flags: signing bit 0, bounded NMT
+discovery bit 1. This application accepts the old value 1 for vendor SDO entry,
+but NMT discovery requires bit 1 (current flags 3). The old 0.1.0 application
+compares all eight words exactly and cannot hand off to the new contract.
+**Upgrade the application first through old bootloader 1.0.5 using manual
+`0x2000:00=1` entry; then selectively program bootloader 1.0.6 by SWD.**
+Preserve factory and journal. See the bootloader README for exact frames and
+the generated signed `out/vega-0.1.1.update.bin` container. Both components are
+needed for automatic repeated LiftAppTool entry.
 
 ## Work plan
 

@@ -65,7 +65,7 @@ static void fail(BootHandoff *h, BootHandoffResult result)
     }
 }
 
-uint32_t BootHandoff_Request(BootHandoff *h, uint32_t now)
+static uint32_t request(BootHandoff *h, uint32_t now, uint32_t mode)
 {
     PsData candidate;
     if (BootHandoff_Busy(h)) { return CO_ABORT_STATE; }
@@ -82,12 +82,18 @@ uint32_t BootHandoff_Request(BootHandoff *h, uint32_t now)
         h->state = BOOT_FAILED; h->result = BOOT_RESULT_RECOVERY_REQUIRED;
         return CO_ABORT_STATE;
     }
+    if ((mode == BOOT_REQUEST_DISCOVERY) &&
+        (candidate.update_state != 0U) &&
+        (candidate.update_state != UINT32_C(0x501))) {
+        h->state = BOOT_FAILED; h->result = BOOT_RESULT_SERVICE_DENIED;
+        return CO_ABORT_STATE;
+    }
     if (!h->platform.enterService(h->platform.user)) {
         h->state = BOOT_FAILED; h->result = BOOT_RESULT_SERVICE_DENIED;
         return CO_ABORT_STATE;
     }
     h->service = true;
-    candidate.boot_request = BOOT_REQUEST_UPDATE;
+    candidate.boot_request = mode;
     candidate.boot_node_id = DEVICE_BOOT_NODE_ID;
     candidate.boot_bitrate = h->platform.bitrate;
     candidate.boot_protocol = BOOT_HANDOFF_PROTOCOL;
@@ -98,6 +104,30 @@ uint32_t BootHandoff_Request(BootHandoff *h, uint32_t now)
     h->state = BOOT_WAIT_ACK; h->result = BOOT_RESULT_NONE;
     h->started_at = now; h->ack_queued = false;
     return 0U;
+}
+
+uint32_t BootHandoff_Request(BootHandoff *h, uint32_t now)
+{
+    return request(h, now, BOOT_REQUEST_UPDATE);
+}
+
+uint32_t BootHandoff_RequestDiscovery(BootHandoff *h, uint32_t now)
+{
+    uint32_t result;
+    if ((h->platform.discoveryInstalled == NULL) ||
+        !h->platform.discoveryInstalled(h->platform.user)) {
+        h->result = BOOT_RESULT_UNSUPPORTED;
+        return CO_ABORT_STATE;
+    }
+    result = request(h, now, BOOT_REQUEST_DISCOVERY);
+    if (result == 0U) {
+        h->state = BOOT_RESETTING;
+        h->result = BOOT_RESULT_OK;
+        h->platform.reset(h->platform.user);
+        fail(h, BOOT_RESULT_RESET_RETURNED);
+        return CO_ABORT_HARDWARE;
+    }
+    return result;
 }
 
 void BootHandoff_AckQueued(BootHandoff *h)

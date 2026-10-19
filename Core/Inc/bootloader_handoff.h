@@ -12,6 +12,7 @@
 #define BOOT_HANDOFF_PROTOCOL 2U
 #define BOOT_REQUEST_NONE 0U
 #define BOOT_REQUEST_UPDATE 1U
+#define BOOT_REQUEST_DISCOVERY 2U
 
 typedef enum {
     BOOT_IDLE = 0, BOOT_WAIT_ACK = 1, BOOT_RESETTING = 2,
@@ -44,6 +45,8 @@ typedef struct {
      * true means it can no longer appear later on CAN. Must be idempotent. */
     bool (*cancelAck)(void *user);
     void (*reset)(void *user);
+    /** Optional: bootloader explicitly advertises bounded NMT discovery. */
+    bool (*discoveryInstalled)(void *user);
 } BootHandoffPlatform;
 
 typedef struct {
@@ -61,6 +64,8 @@ void BootHandoff_Init(BootHandoff *handoff, const BootHandoffPlatform *platform,
                        PsStore *store, PsData *identity, uint8_t node_id);
 bool BootHandoff_Available(const BootHandoff *handoff);
 uint32_t BootHandoff_Request(BootHandoff *handoff, uint32_t now);
+/** Addressed NMT reset has no SDO ACK; reset only after durable service entry. */
+uint32_t BootHandoff_RequestDiscovery(BootHandoff *handoff, uint32_t now);
 /** Called only when the successful final response was accepted by the CAN driver. */
 void BootHandoff_AckQueued(BootHandoff *handoff);
 void BootHandoff_Poll(BootHandoff *handoff, uint32_t now);

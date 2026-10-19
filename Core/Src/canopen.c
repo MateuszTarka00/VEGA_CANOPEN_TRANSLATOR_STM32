@@ -19,6 +19,19 @@ bool Co_Init(Canopen *c, uint8_t node, CoSend send, void *user,
 
 bool Co_Receive(Canopen *c, const CoFrame *f, uint32_t now)
 {
+    if ((f->id == 0U) && (f->length == 2U) &&
+        (f->data[0] == 0x81U) && (f->data[1] == c->node_id)) {
+        if (!c->tx_pending && (c->sdo.state == SDO_IDLE) &&
+            !BootHandoff_Busy(&c->od.handoff)) {
+            uint32_t result = c->od.factory_valid ?
+                BootHandoff_RequestDiscovery(&c->od.handoff, now) :
+                CO_ABORT_HARDWARE;
+            if (result != 0U) {
+                (void)Co_Error(c, 0x5000U, 1U, result);
+            }
+        }
+        return true;
+    }
     if (f->id == (uint16_t)(0x600U + c->node_id)) {
         /* Owner must flush pending responses before accepting another request. */
         if (!c->tx_pending && (c->od.handoff.state != BOOT_WAIT_ACK) &&

@@ -38,10 +38,16 @@ static bool bootInstalled(void *user)
         (vectors[1] >= UINT32_C(0x08008FE0))) {
         return false;
     }
-    for (i = 0U; i < 8U; ++i) {
+    for (i = 0U; i < 7U; ++i) {
         if (contract[i] != expected[i]) { return false; }
     }
-    return true;
+    return (contract[7] & 1U) != 0U;
+}
+
+static bool discoveryInstalled(void *user)
+{
+    const volatile uint32_t *contract = (const volatile uint32_t *)DEVICE_BOOT_CONTRACT;
+    return bootInstalled(user) && ((contract[7] & 2U) != 0U);
 }
 
 static bool enterUpdate(void *user)
@@ -137,7 +143,7 @@ void CanopenPort_Init(void)
     PsIo io = {NULL, readPage, erasePage, writePage};
     BootHandoffPlatform boot = {
         NULL, 250000U, bootInstalled, enterUpdate, leaveUpdate,
-        updateAckStatus, cancelUpdateAck, resetForUpdate
+        updateAckStatus, cancelUpdateAck, resetForUpdate, discoveryInstalled
     };
     Ps_Init(&storage, &io);
     storage_result = Ps_Load(&storage, &identity);
