@@ -60,9 +60,10 @@ bool Flash_NvmErase(uint8_t page)
     erase.TypeErase = FLASH_TYPEERASE_PAGES; erase.NbPages = span.pages;
     erase.Banks = (span.bank == 1U) ? FLASH_BANK_1 : FLASH_BANK_2;
     erase.Page = span.page;
-    if (HAL_FLASH_Unlock() != HAL_OK) { return false; }
-    status = HAL_FLASHEx_Erase(&erase, &error);
-    lockStatus = HAL_FLASH_Lock();
+    if (FLASH_GuardFailure(HAL_FLASH_Unlock()) != HAL_OK) { return false; }
+    status = FLASH_GuardFailure(HAL_FLASHEx_Erase(&erase, &error));
+    lockStatus = (status == HAL_OK) ? HAL_FLASH_Lock() : status;
+    (void)FLASH_GuardFailure(lockStatus);
     return (status == HAL_OK) && (lockStatus == HAL_OK);
 }
 
@@ -73,14 +74,20 @@ bool Flash_NvmWrite(uint8_t page, uint32_t offset, const uint8_t *data, uint32_t
     if ((data == NULL) || !nvmRange(page, offset, size) ||
         ((offset % 8U) != 0U) || ((size % 8U) != 0U)) { return false; }
     address = (uint32_t)(uintptr_t)__canopen_nvm_start__ + (uint32_t)page * FLASH_PAGE_SIZE + offset;
-    if (HAL_FLASH_Unlock() != HAL_OK) { return false; }
+    if (FLASH_GuardFailure(HAL_FLASH_Unlock()) != HAL_OK) { return false; }
     for (i = 0U; i < size; i += 8U) {
         uint64_t word;
         memcpy(&word, &data[i], sizeof(word));
-        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, address + i, word);
+        status = FLASH_GuardFailure(
+            HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, address + i, word));
         if (status != HAL_OK) { break; }
     }
-    lockStatus = HAL_FLASH_Lock();
-    return (status == HAL_OK) && (lockStatus == HAL_OK) &&
-        (memcmp((const void *)(uintptr_t)address, data, size) == 0);
+    lockStatus = (status == HAL_OK) ? HAL_FLASH_Lock() : status;
+    (void)FLASH_GuardFailure(lockStatus);
+    if ((status != HAL_OK) || (lockStatus != HAL_OK)) { return false; }
+    if (memcmp((const void *)(uintptr_t)address, data, size) != 0) {
+        (void)FLASH_GuardFailure(HAL_ERROR);
+        return false;
+    }
+    return true;
 }

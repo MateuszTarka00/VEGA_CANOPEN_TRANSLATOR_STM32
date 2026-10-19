@@ -19,6 +19,9 @@ FiResult Flash_FactoryRead(FiData *data);
  * @brief Bounded CANopen NVM access; logical pages 0/1, 2 KiB each.
  * All callers must serialize writes.
  * Returns false on invalid range, unsupported bank configuration or HAL error.
+ * A Flash operation/readback failure blocks all subsequent writes until reset.
+ * Busy/error waits never perform PER/PG cleanup or LOCK writes on failure.
+ * Read-only factory/NVM access remains available if the hardware permits it.
  */
 bool Flash_NvmRead(uint8_t page, uint32_t offset, uint8_t *data, uint32_t size);
 bool Flash_NvmErase(uint8_t page);
