@@ -20,6 +20,8 @@ static uint8_t timeout_scan = 1U;
 static bool storage_reported;
 static bool factory_reported;
 static uint32_t handoff_tx_buffer;
+static uint8_t handoff_report;
+static uint32_t handoff_flash_sr, handoff_flash_stage, handoff_flash_status;
 
 static bool bootInstalled(void *user)
 {
@@ -199,13 +201,33 @@ bool CanopenPort_Receive(const CAN_Message_t *m)
     if ((m->id > 0x7FFU) || (m->len > 8U)) { return true; }
     frame.id = (uint16_t)m->id; frame.length = m->len;
     memcpy(frame.data, m->data, sizeof(frame.data));
-    return Co_Receive(&gateway, &frame, nowMs());
+    {
+        bool handled = Co_Receive(&gateway, &frame, nowMs());
+        if ((frame.id == 0U) && (frame.length == 2U) &&
+            (frame.data[0] == 0x81U) && (frame.data[1] == gateway.node_id) &&
+            gateway.tx_pending && (gateway.pending.id == 0x81U) &&
+            (gateway.pending.data[6] == 0xB1U)) {
+            handoff_flash_sr = FLASH_Guard.sr;
+            handoff_flash_stage = FLASH_Guard.stage;
+            handoff_flash_status = (uint32_t)FLASH_Guard.status;
+            handoff_report = 1U;
+        }
+        return handled;
+    }
 }
 
 void CanopenPort_Poll(void)
 {
     uint32_t dropped, errors;
     Co_Poll(&gateway, nowMs());
+    if ((handoff_report == 1U) &&
+        Co_Error(&gateway, 0x5002U, 1U, handoff_flash_sr)) {
+        gateway.pending.data[7] = (uint8_t)handoff_flash_stage;
+        handoff_report = 2U;
+    } else if ((handoff_report == 2U) &&
+               Co_Error(&gateway, 0x5003U, 1U, handoff_flash_status)) {
+        handoff_report = 0U;
+    }
     taskENTER_CRITICAL();
     dropped = canOpenRxDropped; errors = canOpenRxErrors;
     taskEXIT_CRITICAL();

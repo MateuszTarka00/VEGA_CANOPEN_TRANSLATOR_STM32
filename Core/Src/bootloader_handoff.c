@@ -69,15 +69,20 @@ static uint32_t request(BootHandoff *h, uint32_t now, uint32_t mode)
 {
     PsData candidate;
     if (BootHandoff_Busy(h)) { return CO_ABORT_STATE; }
+    h->stage = BOOT_STAGE_AVAILABLE;
+    h->storage_result = PS_OK;
     if (!BootHandoff_Available(h)) {
         h->state = BOOT_UNAVAILABLE; h->result = BOOT_RESULT_UNSUPPORTED;
         return CO_ABORT_STATE;
     }
     /* Never manufacture boot decisions from uncommissioned/corrupt defaults. */
-    if (Ps_Load(h->store, &candidate) != PS_OK) {
+    h->stage = BOOT_STAGE_LOAD;
+    h->storage_result = Ps_Load(h->store, &candidate);
+    if (h->storage_result != PS_OK) {
         h->state = BOOT_FAILED; h->result = BOOT_RESULT_STORAGE;
         return CO_ABORT_HARDWARE;
     }
+    h->stage = BOOT_STAGE_JOURNAL;
     if (candidate.boot_request != BOOT_REQUEST_NONE) {
         h->state = BOOT_FAILED; h->result = BOOT_RESULT_RECOVERY_REQUIRED;
         return CO_ABORT_STATE;
@@ -88,6 +93,7 @@ static uint32_t request(BootHandoff *h, uint32_t now, uint32_t mode)
         h->state = BOOT_FAILED; h->result = BOOT_RESULT_SERVICE_DENIED;
         return CO_ABORT_STATE;
     }
+    h->stage = BOOT_STAGE_SERVICE;
     if (!h->platform.enterService(h->platform.user)) {
         h->state = BOOT_FAILED; h->result = BOOT_RESULT_SERVICE_DENIED;
         return CO_ABORT_STATE;
@@ -97,11 +103,14 @@ static uint32_t request(BootHandoff *h, uint32_t now, uint32_t mode)
     candidate.boot_node_id = DEVICE_BOOT_NODE_ID;
     candidate.boot_bitrate = h->platform.bitrate;
     candidate.boot_protocol = BOOT_HANDOFF_PROTOCOL;
-    if (Ps_Save(h->store, &candidate) != PS_OK) {
+    h->stage = BOOT_STAGE_SAVE;
+    h->storage_result = Ps_Save(h->store, &candidate);
+    if (h->storage_result != PS_OK) {
         fail(h, BOOT_RESULT_STORAGE); return CO_ABORT_HARDWARE;
     }
     *h->identity = candidate;
     h->state = BOOT_WAIT_ACK; h->result = BOOT_RESULT_NONE;
+    h->stage = BOOT_STAGE_WAIT_ACK;
     h->started_at = now; h->ack_queued = false;
     return 0U;
 }
@@ -114,6 +123,9 @@ uint32_t BootHandoff_Request(BootHandoff *h, uint32_t now)
 uint32_t BootHandoff_RequestDiscovery(BootHandoff *h, uint32_t now)
 {
     uint32_t result;
+    if (BootHandoff_Busy(h)) { return CO_ABORT_STATE; }
+    h->stage = BOOT_STAGE_DISCOVERY;
+    h->storage_result = PS_OK;
     if ((h->platform.discoveryInstalled == NULL) ||
         !h->platform.discoveryInstalled(h->platform.user)) {
         h->result = BOOT_RESULT_UNSUPPORTED;
@@ -122,6 +134,7 @@ uint32_t BootHandoff_RequestDiscovery(BootHandoff *h, uint32_t now)
     result = request(h, now, BOOT_REQUEST_DISCOVERY);
     if (result == 0U) {
         h->state = BOOT_RESETTING;
+        h->stage = BOOT_STAGE_RESET;
         h->result = BOOT_RESULT_OK;
         h->platform.reset(h->platform.user);
         fail(h, BOOT_RESULT_RESET_RETURNED);
@@ -141,6 +154,7 @@ void BootHandoff_Poll(BootHandoff *h, uint32_t now)
         BootTxStatus tx = h->ack_queued ? h->platform.ackStatus(h->platform.user) : BOOT_TX_PENDING;
         if (tx == BOOT_TX_CONFIRMED) {
             h->state = BOOT_RESETTING; h->result = BOOT_RESULT_OK;
+            h->stage = BOOT_STAGE_RESET;
             h->platform.reset(h->platform.user);
             fail(h, BOOT_RESULT_RESET_RETURNED);
         } else if (tx == BOOT_TX_FAILED) { fail(h, BOOT_RESULT_TX_FAILED); }

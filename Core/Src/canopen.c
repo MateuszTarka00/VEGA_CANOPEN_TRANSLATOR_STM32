@@ -27,7 +27,11 @@ bool Co_Receive(Canopen *c, const CoFrame *f, uint32_t now)
                 BootHandoff_RequestDiscovery(&c->od.handoff, now) :
                 CO_ABORT_HARDWARE;
             if (result != 0U) {
-                (void)Co_Error(c, 0x5000U, 1U, result);
+                uint32_t detail = UINT32_C(0xB1000000) |
+                    ((uint32_t)c->od.handoff.storage_result << 16U) |
+                    ((uint32_t)c->od.handoff.result << 8U) |
+                    (uint32_t)c->od.handoff.stage;
+                (void)Co_Error(c, 0x5000U, 1U, detail);
             }
         }
         return true;

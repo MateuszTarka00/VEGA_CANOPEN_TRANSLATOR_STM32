@@ -25,6 +25,11 @@ typedef enum {
     BOOT_RESULT_RESET_RETURNED, BOOT_RESULT_RECOVERY_REQUIRED
 } BootHandoffResult;
 typedef enum { BOOT_TX_PENDING, BOOT_TX_CONFIRMED, BOOT_TX_FAILED } BootTxStatus;
+typedef enum {
+    BOOT_STAGE_NONE, BOOT_STAGE_AVAILABLE, BOOT_STAGE_LOAD,
+    BOOT_STAGE_JOURNAL, BOOT_STAGE_SERVICE, BOOT_STAGE_SAVE,
+    BOOT_STAGE_WAIT_ACK, BOOT_STAGE_RESET, BOOT_STAGE_DISCOVERY
+} BootHandoffStage;
 
 /** Board implementation is mandatory before enabling handoff.
  * installed verifies the actual protected bootloader/layout/contract, not a flag.
@@ -55,6 +60,8 @@ typedef struct {
     PsData *identity;
     BootHandoffState state;
     BootHandoffResult result;
+    BootHandoffStage stage;
+    PsResult storage_result;
     uint32_t started_at, timeout_ms;
     uint8_t node_id;
     bool service, ack_queued;

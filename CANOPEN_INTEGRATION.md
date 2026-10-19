@@ -2,6 +2,48 @@
 
 ## Decision and current release boundary
 
+### Application 0.1.2 diagnostic build
+
+The second update also failed with the signed Debug image installed through
+CAN, both with and without a reset. This rules out a Release-only failure;
+it does not identify the failing Flash operation. No handoff/Flash recovery
+policy is changed in this build. Bootloader 1.0.7 remains unchanged.
+
+Failed addressed NMT discovery emits Node 1 EMCY `0x5000` with manufacturer
+bytes `[stage, handoff_result, PsResult, B1, 00]` instead of the undifferentiated
+SDO abort code. Stage values: 1 availability, 2 journal load, 3 journal-state
+gate, 4 service interlock, 5 request save, 6 wait ACK, 7 reset returned,
+8 discovery capability. PsResult retains the primary operation's result even
+when subsequent reconciliation succeeds. Handoff result retains existing
+values 0..8. Invalid factory identity emits stage/result zero with marker B1.
+
+After this event is accepted by the CAN driver, the target adapter schedules
+two additional EMCYs through the existing single-owner TX path:
+
+- `0x5002`: four little-endian bytes of latched `FLASH_Guard.sr`, then guard stage.
+- `0x5003`: four little-endian bytes of latched HAL guard status, then zero.
+
+Snapshots are captured immediately on return from the failed request. Pending
+frames retry on driver rejection; no resets, auto-cleared Flash errors or
+service-interlock bypasses are added. If CAN itself cannot transmit, the
+additional diagnostics cannot be delivered. Save the full trace without
+filtering EMCYs; Expressions and successful SDO reads are not required.
+
+Diagnostic deliverables are generated in the bootloader repository:
+`out/vega-0.1.2-handoff-debug.update.bin` (50,888 bytes) for CAN and
+`out/vega-0.1.2-handoff-swd/slot-a.bin` (106,648 bytes) for selective SWD
+recovery when existing application handoff cannot enter the receiver.
+The latter contains the Debug application, erased payload padding and its
+matching signed manifest at `0x08023000`; program it at `0x08009000`.
+Use only while the application is running or the device is idle, not during
+an A/B swap. Preserve the bootloader, Slot B, scratch, factory and journal;
+do not mass erase, program `initial.hex` or write the generated factory record.
+The slot image was verified against the signed package byte-for-byte.
+After programming, disconnect debug and power-cycle so bootloader 1.0.7
+validates and starts the image normally. Check application version 0.1.2,
+wait ten seconds, then record the next NMT entry attempt and all EMCYs.
+This is diagnostic instrumentation, not a claim that the root fault is fixed.
+
 **The bootloader, not the application, will receive and install firmware.**
 The existing application continues translating CANopen LOP <-> VEGA. It exposes
 identification/diagnostic OD and a small request-to-bootloader interface.

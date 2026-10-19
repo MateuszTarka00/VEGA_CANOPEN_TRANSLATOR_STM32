@@ -395,6 +395,20 @@ static void testNmtDiscovery(void)
             assert(!c.od.handoff.ack_queued && b.cancel_count == 0U);
             assert(c.tx_pending && c.pending.id == 0x81U); /* EMCY on returned reset. */
         } else { assert(b.reset_count == 0U); }
+        if (scenario == 0U || scenario == 14U) {
+            assert(c.od.handoff.stage == BOOT_STAGE_RESET);
+            assert(Co_Get32(&c.pending.data[3]) == UINT32_C(0xB1000707));
+        } else if (scenario == 12U) {
+            assert(c.od.handoff.stage == BOOT_STAGE_SAVE);
+            assert(c.od.handoff.storage_result == PS_IO_ERROR);
+            assert(Co_Get32(&c.pending.data[3]) == UINT32_C(0xB1030405));
+        } else if (scenario == 11U) {
+            assert(c.od.handoff.stage == BOOT_STAGE_SERVICE);
+            assert(Co_Get32(&c.pending.data[3]) == UINT32_C(0xB1000304));
+        } else if (scenario == 13U) {
+            assert(c.od.handoff.stage == BOOT_STAGE_JOURNAL);
+            assert(Co_Get32(&c.pending.data[3]) == UINT32_C(0xB1000303));
+        }
         assert(sender.count == 1U); /* NMT never produces an SDO response. */
         assert(Ps_Load(&s, &loaded) == PS_OK && loaded.boot_request == 0U);
         assert(!b.service);
@@ -404,6 +418,8 @@ static void testNmtDiscovery(void)
     b.fail_commit_on_entry = true;
     BootHandoff_Init(&c.od.handoff, &p, &s, &d, 1U);
     assert(BootHandoff_RequestDiscovery(&c.od.handoff, 0U) == CO_ABORT_HARDWARE);
+    assert(c.od.handoff.stage == BOOT_STAGE_SAVE &&
+           c.od.handoff.storage_result == PS_IO_ERROR);
     assert(!b.service && b.reset_count == 0U);
     assert(Ps_Load(&s, &loaded) == PS_OK && loaded.boot_request == 0U);
     puts("NMT discovery: addressed-only, no ACK, durable service, capability/trial/IO gates OK");
