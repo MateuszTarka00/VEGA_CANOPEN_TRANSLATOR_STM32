@@ -470,9 +470,12 @@ void canOpenRx(void *argument)
 		osDelay(1U);
 		continue;
 	}
+    if (!update_service_requested) {
+        LOP_PollFloorTexts();
+    }
 	if(xQueueReceive(canOpenRxQueue, &msg, pdMS_TO_TICKS(1U)) == pdTRUE)
 	{
-		if (!CanopenPort_Receive(&msg)) {
+    if (!CanopenPort_Receive(&msg) && !update_service_requested) {
 			processCanOpenMessage(&msg);
 		}
 	}

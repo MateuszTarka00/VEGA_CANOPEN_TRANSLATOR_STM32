@@ -175,6 +175,7 @@ typedef struct
 
     uint8_t displayedFloor;          /**< Current floor to display */
     uint8_t displayedArrow;          /**< Arrow indicator (0x00/0x10/0x20/0x30) */
+    bool floorTextPending;
 
     uint8_t changeFlags;             /**< Bitmask of changed properties (ChangeFlags) */
 

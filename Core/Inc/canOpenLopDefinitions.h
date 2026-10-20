@@ -18,6 +18,7 @@
 #include "main.h"
 #include "canOpenManager.h"
 
+
 /* ============================================================================ */
 /* LOP CAN MESSAGE ID MAPPINGS                                               */
 /* ============================================================================ */
@@ -318,6 +319,9 @@ typedef union
 /* ============================================================================ */
 /* FUNCTION PROTOTYPES                                                        */
 /* ============================================================================ */
+
+void LOP_PollFloorTexts(void);
+void LOP_ResetFloorTexts(uint32_t nodeId);
 
 /**
  * @brief Decompose received CANopen message and update node state

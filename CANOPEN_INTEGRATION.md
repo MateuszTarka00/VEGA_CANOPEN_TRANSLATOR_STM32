@@ -2,6 +2,22 @@
 
 ## Decision and current release boundary
 
+### Remote floor text table
+
+After node 21 announces itself by heartbeat and its LOP assignment requests
+finish, the gateway sequentially uploads `0x62B0:01` through `0x62B0:18`.
+Texts are cached in RAM using `GenemekFloorConfig_t`, with up to eight bytes
+per floor. Expedited and segmented SDO transfers are supported. A failed read
+is attempted at most three times, with a 500 ms response timeout. Node 21
+boot-up invalidates the cache and starts a fresh read.
+
+`DISPLAYED_FLOOR` values 1..24 select subindices 01..18 respectively. The
+selected text is downloaded to `0x6530:02` of each destination node; the floor
+PDO remains unchanged. Missing table entries and values outside this range
+retain the previous decimal-string fallback. Completed reads refresh matching
+displays even if the floor value has not changed. The SDO client runs in
+`CanOpenRxT`; the transmit task only marks pending text updates.
+
 ### Application 0.1.3 / bootloader 1.0.8: non-Flash reset handoff
 
 The measured second-update failure was Flash CFGBSY during the handoff journal

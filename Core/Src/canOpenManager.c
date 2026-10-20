@@ -99,6 +99,7 @@ static CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.changeFlags = 0;
 	node->canOpenNodeHandler.displayedArrow = 0;
 	node->canOpenNodeHandler.displayedFloor = 0xFF;
+	node->canOpenNodeHandler.floorTextPending = FALSE;
 	node->canOpenNodeHandler.doorMap = 0;
 	node->canOpenNodeHandler.liftMap = 0;
 	/* LOP request tracking - will be handled by CanOpenMenagerT after NMT handshake */
@@ -252,6 +253,9 @@ void processCanOpenMessage(CAN_Message_t *msg)
 
 	/* Process heartbeat and NMT state messages (COB-ID 0x700-0x7FF) */
 	if (msg->id >= CAN_OPEN_HEARTBEAT_MSG_ID && msg->id <= 0x77F) {
+		if (msg->data[0] == CO_NMT_INITIALIZING) {
+			LOP_ResetFloorTexts(canOpenId);
+		}
 		/* Extract NMT state from last byte of heartbeat message */
 		current->canOpenNodeHandler.nmtState = msg->data[msg->len - 1];
 		if ((msg->data[0] == CO_NMT_INITIALIZING) || (msg->data[0] == CO_NMT_OPERATIONAL)) {

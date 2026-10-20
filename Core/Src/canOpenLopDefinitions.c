@@ -17,6 +17,8 @@
 #include "canOpenLopDefinitions.h"
 #include "string.h" /* For memcpy, memset */
 #include "protocolUtils.h"
+#include "task.h"
+#include <stdio.h>
 
 #define GENEMEK_MAX_FLOORS       24
 #define GENEMEK_FLOOR_TEXT_LEN    8
@@ -29,6 +31,257 @@ typedef struct
 } GenemekFloorConfig_t;
 
 static GenemekFloorConfig_t genemekFloorConfig = {0};
+
+#define GENEMEK_NODE_ID 21U
+#define GENEMEK_FLOOR_TEXT_OD 0x62B0U
+#define FLOOR_SDO_TIMEOUT_MS 500U
+
+typedef enum {
+    FLOOR_SDO_IDLE,
+    FLOOR_SDO_UPLOAD_INIT,
+    FLOOR_SDO_UPLOAD_SEGMENT,
+    FLOOR_SDO_DOWNLOAD_INIT,
+    FLOOR_SDO_DOWNLOAD_SEGMENT
+} FloorSdoState;
+
+static struct {
+    FloorSdoState state;
+    uint8_t nodeId, subIndex, toggle, offset, length, segmentLength;
+    uint8_t buffer[GENEMEK_FLOOR_TEXT_LEN];
+    bool sizeKnown;
+    TickType_t lastActivity;
+} floorSdo;
+static uint8_t nextFloorText = 1U;
+static uint8_t floorTextAttempts;
+static bool floorTextsStarted;
+static uint32_t floorTextsValid;
+
+static bool sendFloorSdo(uint8_t command, uint16_t index, uint8_t subIndex,
+                         const uint8_t *payload)
+{
+    uint8_t data[8] = {command, (uint8_t)index, (uint8_t)(index >> 8), subIndex};
+    if (payload != NULL) {
+        memcpy(&data[4], payload, 4U);
+    }
+    if (!protocolSend(MASTER_LOP_TX_SDO + floorSdo.nodeId, data, 8U, PROTOCOL_CANOPEN)) {
+        return false;
+    }
+    floorSdo.lastActivity = xTaskGetTickCount();
+    return true;
+}
+
+static void finishFloorSdo(bool success)
+{
+    if (floorSdo.state == FLOOR_SDO_UPLOAD_INIT || floorSdo.state == FLOOR_SDO_UPLOAD_SEGMENT) {
+        if (success) {
+            uint8_t slot = floorSdo.subIndex - 1U;
+            memcpy(genemekFloorConfig.floorTexts[slot], floorSdo.buffer, GENEMEK_FLOOR_TEXT_LEN);
+            floorTextsValid |= 1UL << slot;
+            genemekFloorConfig.floorCount++;
+            CanOpenNodeObject *current = getCanOpenObjectsList();
+            while (current != NULL) {
+                if (current->canOpenNodeHandler.displayedFloor == floorSdo.subIndex) {
+                    current->canOpenNodeHandler.floorTextPending = true;
+                }
+                current = current->nextObject;
+            }
+        }
+        if (success || ++floorTextAttempts >= 3U) {
+            nextFloorText++;
+            floorTextAttempts = 0U;
+        }
+    }
+    floorSdo.state = FLOOR_SDO_IDLE;
+}
+
+static void abortFloorSdo(uint32_t code)
+{
+    uint8_t payload[4] = {(uint8_t)code, (uint8_t)(code >> 8),
+                          (uint8_t)(code >> 16), (uint8_t)(code >> 24)};
+    bool upload = floorSdo.state == FLOOR_SDO_UPLOAD_INIT || floorSdo.state == FLOOR_SDO_UPLOAD_SEGMENT;
+    sendFloorSdo(0x80U, upload ? GENEMEK_FLOOR_TEXT_OD : CAR_FLOOR_TEXT_OD,
+                 upload ? floorSdo.subIndex : CAR_FLOOR_TEXT_SUB, payload);
+    finishFloorSdo(false);
+}
+
+static void sendFloorDownloadSegment(void)
+{
+    uint8_t remaining = floorSdo.length - floorSdo.offset;
+    uint8_t count = remaining > 7U ? 7U : remaining;
+    uint8_t data[8] = {0};
+    data[0] = (uint8_t)((floorSdo.toggle << 4) | ((7U - count) << 1) | (remaining <= 7U));
+    memcpy(&data[1], &floorSdo.buffer[floorSdo.offset], count);
+    floorSdo.segmentLength = count;
+    if (!protocolSend(MASTER_LOP_TX_SDO + floorSdo.nodeId, data, 8U, PROTOCOL_CANOPEN)) {
+        finishFloorSdo(false);
+        return;
+    }
+    floorSdo.lastActivity = xTaskGetTickCount();
+}
+
+void LOP_ResetFloorTexts(uint32_t nodeId)
+{
+    if (nodeId != GENEMEK_NODE_ID) { return; }
+    if (floorSdo.state == FLOOR_SDO_UPLOAD_INIT || floorSdo.state == FLOOR_SDO_UPLOAD_SEGMENT) {
+        floorSdo.state = FLOOR_SDO_IDLE;
+    }
+    memset(&genemekFloorConfig, 0, sizeof(genemekFloorConfig));
+    floorTextsValid = 0U;
+    nextFloorText = 1U;
+    floorTextAttempts = 0U;
+    floorTextsStarted = false;
+}
+
+static bool receiveFloorSdo(CanOpenNodeHandler *node, CAN_Message_t *msg)
+{
+    if (floorSdo.state == FLOOR_SDO_IDLE || node->canOpenID != floorSdo.nodeId || msg->len != 8U) {
+        return false;
+    }
+    uint8_t command = msg->data[0];
+    uint16_t index = (uint16_t)msg->data[1] | ((uint16_t)msg->data[2] << 8);
+    bool upload = floorSdo.state == FLOOR_SDO_UPLOAD_INIT || floorSdo.state == FLOOR_SDO_UPLOAD_SEGMENT;
+    bool matches = index == (upload ? GENEMEK_FLOOR_TEXT_OD : CAR_FLOOR_TEXT_OD) &&
+        msg->data[3] == (upload ? floorSdo.subIndex : CAR_FLOOR_TEXT_SUB);
+    if (command == 0x80U) {
+        if (!matches) { return false; }
+        finishFloorSdo(false);
+        return true;
+    }
+    switch (floorSdo.state) {
+    case FLOOR_SDO_UPLOAD_INIT:
+        if (!matches || (command & 0xE0U) != 0x40U) { return false; }
+        if (command & 0x02U) {
+            floorSdo.length = (command & 1U) ? (uint8_t)(4U - ((command >> 2) & 3U)) : 4U;
+            memcpy(floorSdo.buffer, &msg->data[4], floorSdo.length);
+            finishFloorSdo(true);
+        } else {
+            uint32_t size = (uint32_t)msg->data[4] | ((uint32_t)msg->data[5] << 8) |
+                ((uint32_t)msg->data[6] << 16) | ((uint32_t)msg->data[7] << 24);
+            floorSdo.sizeKnown = (command & 1U) != 0U;
+            if (floorSdo.sizeKnown && size > GENEMEK_FLOOR_TEXT_LEN) {
+                abortFloorSdo(0x06070010UL);
+                break;
+            }
+            floorSdo.length = (uint8_t)size;
+            floorSdo.state = FLOOR_SDO_UPLOAD_SEGMENT;
+            if (!sendFloorSdo(0x60U, 0U, 0U, NULL)) { finishFloorSdo(false); }
+        }
+        break;
+    case FLOOR_SDO_UPLOAD_SEGMENT: {
+        if ((command & 0xE0U) != 0U) { return false; }
+        uint8_t count = 7U - ((command >> 1) & 7U);
+        if (((command >> 4) & 1U) != floorSdo.toggle) {
+            abortFloorSdo(0x05030000UL);
+        } else if (floorSdo.offset + count > GENEMEK_FLOOR_TEXT_LEN ||
+                   (!(command & 1U) && count != 7U)) {
+            abortFloorSdo(0x06070010UL);
+        } else {
+            memcpy(&floorSdo.buffer[floorSdo.offset], &msg->data[1], count);
+            floorSdo.offset += count;
+            if (command & 1U) {
+                if (floorSdo.sizeKnown && floorSdo.offset != floorSdo.length) {
+                    abortFloorSdo(0x06070010UL);
+                } else {
+                    finishFloorSdo(true);
+                }
+            } else {
+                floorSdo.toggle ^= 1U;
+                if (!sendFloorSdo((uint8_t)(0x60U | (floorSdo.toggle << 4)), 0U, 0U, NULL)) {
+                    finishFloorSdo(false);
+                }
+            }
+        }
+        break;
+    }
+    case FLOOR_SDO_DOWNLOAD_INIT:
+        if (!matches || command != 0x60U) { return false; }
+        if (floorSdo.length <= 4U) {
+            finishFloorSdo(true);
+        } else {
+            floorSdo.state = FLOOR_SDO_DOWNLOAD_SEGMENT;
+            sendFloorDownloadSegment();
+        }
+        break;
+    case FLOOR_SDO_DOWNLOAD_SEGMENT:
+        if ((command & 0xEFU) != 0x20U) { return false; }
+        if (((command >> 4) & 1U) != floorSdo.toggle) {
+            abortFloorSdo(0x05030000UL);
+        } else {
+            floorSdo.offset += floorSdo.segmentLength;
+            if (floorSdo.offset == floorSdo.length) {
+                finishFloorSdo(true);
+            } else {
+                floorSdo.toggle ^= 1U;
+                sendFloorDownloadSegment();
+            }
+        }
+        break;
+    default:
+        return false;
+    }
+    return true;
+}
+
+void LOP_PollFloorTexts(void)
+{
+    if (floorSdo.state != FLOOR_SDO_IDLE) {
+        if ((xTaskGetTickCount() - floorSdo.lastActivity) >= pdMS_TO_TICKS(FLOOR_SDO_TIMEOUT_MS)) {
+            abortFloorSdo(0x05040000UL);
+        }
+        return;
+    }
+    CanOpenNodeObject *current = getCanOpenObjectsList();
+    while (current != NULL) {
+        CanOpenNodeHandler *node = &current->canOpenNodeHandler;
+        if (node->canOpenID == GENEMEK_NODE_ID && !floorTextsStarted && node->heartbeatReceived) {
+            floorTextsStarted = true;
+        }
+        if (node->canOpenID == GENEMEK_NODE_ID && floorTextsStarted &&
+            nextFloorText <= GENEMEK_MAX_FLOORS && !node->lopRequestNeeded && !node->heartbeatTimeoutError) {
+            memset(&floorSdo, 0, sizeof(floorSdo));
+            floorSdo.state = FLOOR_SDO_UPLOAD_INIT;
+            floorSdo.nodeId = GENEMEK_NODE_ID;
+            floorSdo.subIndex = nextFloorText;
+            if (!sendFloorSdo(0x40U, GENEMEK_FLOOR_TEXT_OD, nextFloorText, NULL)) {
+                finishFloorSdo(false);
+            }
+            return;
+        }
+        current = current->nextObject;
+    }
+    current = getCanOpenObjectsList();
+    while (current != NULL) {
+        CanOpenNodeHandler *node = &current->canOpenNodeHandler;
+        if (node->floorTextPending && !node->lopRequestNeeded && !node->heartbeatTimeoutError) {
+            uint8_t floor;
+            taskENTER_CRITICAL();
+            floor = node->displayedFloor;
+            node->floorTextPending = false;
+            taskEXIT_CRITICAL();
+            memset(&floorSdo, 0, sizeof(floorSdo));
+            floorSdo.nodeId = (uint8_t)node->canOpenID;
+            if (floor >= 1U && floor <= GENEMEK_MAX_FLOORS && (floorTextsValid & (1UL << (floor - 1U)))) {
+                memcpy(floorSdo.buffer, genemekFloorConfig.floorTexts[floor - 1U], GENEMEK_FLOOR_TEXT_LEN);
+                while (floorSdo.length < GENEMEK_FLOOR_TEXT_LEN && floorSdo.buffer[floorSdo.length] != 0U) {
+                    floorSdo.length++;
+                }
+            } else {
+                floorSdo.length = (uint8_t)snprintf((char *)floorSdo.buffer, sizeof(floorSdo.buffer), "%u", (unsigned int)floor);
+            }
+            if (floorSdo.length == 0U) { floorSdo.length = 1U; }
+            floorSdo.state = FLOOR_SDO_DOWNLOAD_INIT;
+            uint8_t size[4] = {floorSdo.length, 0U, 0U, 0U};
+            uint8_t command = floorSdo.length <= 4U ? (uint8_t)(0x23U | ((4U - floorSdo.length) << 2)) : 0x21U;
+            if (!sendFloorSdo(command, CAR_FLOOR_TEXT_OD, CAR_FLOOR_TEXT_SUB,
+                              floorSdo.length <= 4U ? floorSdo.buffer : size)) {
+                node->floorTextPending = true;
+                floorSdo.state = FLOOR_SDO_IDLE;
+            }
+            return;
+        }
+        current = current->nextObject;
+    }
+}
 
 /**
  * @brief Decompose and process received CANopen message into node state updates
@@ -97,8 +350,14 @@ void decomposeCanOpenMessage(CanOpenNodeHandler *node, CAN_Message_t *msg)
 		break; /* Exit switch - DO NOT fall through to next case */
 
 	case MASTER_LOP_RX_LIFT_DOOR:
+        if (receiveFloorSdo(node, msg)) {
+            break;
+        }
 		/* Process SDO response message (device configuration, 8 bytes) */
 		if (msg->len >= CAN_OPEN_MSG_SDO_LENGTH) {
+            if ((msg->data[0] & 0xF3U) != 0x43U) {
+                break;
+            }
 			sdoRxTx decomposedMessage;
 			memcpy(decomposedMessage.data, msg->data, CAN_OPEN_MSG_SDO_LENGTH);
 
@@ -264,47 +523,7 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
     /* Handle displayed floor indicator change */
     if (node->changeFlags & DISPLAYED_FLOOR) {
         FloorDisplayMessageTx msg = {0};
-        sdoRxTx sdo = {0};
-
-        /* Convert floor number to ASCII string */
-        char floorText[5] = {0};
-
-        int textLength = snprintf(
-            floorText,
-            sizeof(floorText),
-            "%u",
-            (unsigned int)node->displayedFloor
-        );
-
-        /* SDO expedited download supports 1-4 bytes */
-        if (textLength > 0 && textLength <= 4) {
-
-            /* Select SDO command based on string length */
-            switch (textLength) {
-                case 1: sdo.command = 0x2F; break;
-                case 2: sdo.command = 0x2B; break;
-                case 3: sdo.command = 0x27; break;
-                case 4: sdo.command = 0x23; break;
-                default: break;
-            }
-
-            sdo.index = CAR_FLOOR_TEXT_OD;    /* 0x6530 */
-            sdo.subIndex = CAR_FLOOR_TEXT_SUB; /* 0x02 */
-
-            memcpy(
-                sdo.returnedData,
-                floorText,
-                (size_t)textLength
-            );
-
-            /* Write floor text to OD */
-            protocolSend(
-                MASTER_LOP_TX_SDO + node->canOpenID,
-                sdo.data,
-                8,
-                PROTOCOL_CANOPEN
-            );
-        }
+        node->floorTextPending = true;
 
         /* Compose floor display message */
         msg.function = LOP_LIFT_DISPLAY_FLOOR_ID;
@@ -373,6 +592,9 @@ void LOP_RequestAssignment(CanOpenNodeHandler *node)
 	if (node == NULL) {
 		return; /* Invalid node pointer */
 	}
+    if (floorSdo.state != FLOOR_SDO_IDLE && floorSdo.nodeId == node->canOpenID) {
+        return;
+    }
 
 	sdoRxTx msg;
 	/* Calculate message ID: base address + node ID offset */
