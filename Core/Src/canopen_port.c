@@ -5,6 +5,7 @@
 #include "canopen_port.h"
 #include "canopen.h"
 #include "flash.h"
+#include "boot_reset_request.h"
 #include <string.h>
 
 #define APP_BOOT_TX_TRIAL UINT32_C(0x500)
@@ -43,7 +44,8 @@ static bool bootInstalled(void *user)
     for (i = 0U; i < 7U; ++i) {
         if (contract[i] != expected[i]) { return false; }
     }
-    return (contract[7] & 1U) != 0U;
+    return (contract[7] & (1U | BOOT_RESET_CAPABILITY)) ==
+        (1U | BOOT_RESET_CAPABILITY);
 }
 
 static bool discoveryInstalled(void *user)
@@ -98,7 +100,22 @@ static bool cancelUpdateAck(void *user)
 static void resetForUpdate(void *user)
 {
     (void)user;
+    /* Remove historical reset flags so the receiver can identify this reset. */
+    RCC->CSR |= RCC_CSR_RMVF;
+    __DSB();
     NVIC_SystemReset();
+}
+
+static bool prepareReset(void *user, uint32_t mode)
+{
+    (void)user;
+    return BootReset_Set(mode);
+}
+
+static bool clearReset(void *user)
+{
+    (void)user;
+    return BootReset_Clear();
 }
 
 static bool readPage(void *user, uint8_t page, uint32_t offset, uint8_t *data, uint32_t size)
@@ -145,7 +162,8 @@ void CanopenPort_Init(void)
     PsIo io = {NULL, readPage, erasePage, writePage};
     BootHandoffPlatform boot = {
         NULL, 250000U, bootInstalled, enterUpdate, leaveUpdate,
-        updateAckStatus, cancelUpdateAck, resetForUpdate, discoveryInstalled
+        updateAckStatus, cancelUpdateAck, resetForUpdate, discoveryInstalled,
+        prepareReset, clearReset
     };
     Ps_Init(&storage, &io);
     storage_result = Ps_Load(&storage, &identity);

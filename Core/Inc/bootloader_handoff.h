@@ -22,7 +22,8 @@ typedef enum {
     BOOT_RESULT_NONE, BOOT_RESULT_OK, BOOT_RESULT_UNSUPPORTED,
     BOOT_RESULT_SERVICE_DENIED, BOOT_RESULT_STORAGE,
     BOOT_RESULT_TX_TIMEOUT, BOOT_RESULT_TX_FAILED,
-    BOOT_RESULT_RESET_RETURNED, BOOT_RESULT_RECOVERY_REQUIRED
+    BOOT_RESULT_RESET_RETURNED, BOOT_RESULT_RECOVERY_REQUIRED,
+    BOOT_RESULT_MARKER
 } BootHandoffResult;
 typedef enum { BOOT_TX_PENDING, BOOT_TX_CONFIRMED, BOOT_TX_FAILED } BootTxStatus;
 typedef enum {
@@ -52,6 +53,9 @@ typedef struct {
     void (*reset)(void *user);
     /** Optional: bootloader explicitly advertises bounded NMT discovery. */
     bool (*discoveryInstalled)(void *user);
+    /** Commit/clear a one-shot non-Flash reset marker; verify register readback. */
+    bool (*prepareReset)(void *user, uint32_t mode);
+    bool (*clearReset)(void *user);
 } BootHandoffPlatform;
 
 typedef struct {
@@ -71,12 +75,12 @@ void BootHandoff_Init(BootHandoff *handoff, const BootHandoffPlatform *platform,
                        PsStore *store, PsData *identity, uint8_t node_id);
 bool BootHandoff_Available(const BootHandoff *handoff);
 uint32_t BootHandoff_Request(BootHandoff *handoff, uint32_t now);
-/** Addressed NMT reset has no SDO ACK; reset only after durable service entry. */
+/** Addressed NMT reset has no SDO ACK; reset only after verified marker/service entry. */
 uint32_t BootHandoff_RequestDiscovery(BootHandoff *handoff, uint32_t now);
 /** Called only when the successful final response was accepted by the CAN driver. */
 void BootHandoff_AckQueued(BootHandoff *handoff);
 void BootHandoff_Poll(BootHandoff *handoff, uint32_t now);
-/** Recover a failed transaction, clearing any durable request before leaving service. */
+/** Clear the reset marker before leaving service; legacy journal requests fail closed. */
 uint32_t BootHandoff_Recover(BootHandoff *handoff);
 /** Blocks other OD writes/RX during the committed transition or unresolved failure. */
 bool BootHandoff_Busy(const BootHandoff *handoff);

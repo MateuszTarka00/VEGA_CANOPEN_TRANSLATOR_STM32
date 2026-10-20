@@ -2,7 +2,62 @@
 
 ## Decision and current release boundary
 
-### Application 0.1.2 diagnostic build
+### Application 0.1.3 / bootloader 1.0.8: non-Flash reset handoff
+
+The measured second-update failure was Flash CFGBSY during the handoff journal
+save, before reset (`stage=5`, result=4, PS_IO_ERROR, SR=0x00040000,
+guard stage=1, HAL_TIMEOUT). Entry now uses otherwise unused TAMP BKP0R/BKP1R,
+not a Flash write. Shared `boot_reset_request.h` is byte-identical in both
+projects and reserves those registers for this protocol.
+
+Service authorization/quiescence, committed journal reads, factory validation
+and trial gates remain mandatory. After those gates, mode 1 (vendor service)
+or 2 (NMT discovery) is committed as token `0x42525100 | mode` and its
+complement, with readback. Vendor SDO waits for its exact final TX confirmation;
+addressed NMT resets immediately without inventing an ACK. Timeout, TX failure
+or a returned reset clears/verifies the marker before resuming tasks.
+Uncertain marker clearance retains RECOVERY_REQUIRED and quiescence. Neither
+request nor cleanup calls Ps_Save/Flash erase/program; legacy nonzero journal
+requests fail closed in the application and require bootloader reconciliation.
+
+The bootloader consumes/clears the marker before journal/boot decisions and
+accepts it only on software reset, not power/brownout/watchdog/option-byte/
+low-power reset. It clears reset flags at startup; the application also clears
+old flags immediately before intentional handoff reset. Cold startup does not
+enter service because a stale backup value survived. No RTC oscillator,
+backup-domain reset, linker or stack changes are needed.
+
+Contract flags **7** mean signing, bounded discovery and non-Flash reset marker.
+Both entry commands refuse older bootloaders; there is no Flash fallback.
+The existing five-second discovery policy, valid SDO contact, immediate ordinary
+power-on, image authentication, A/B swap and trial/rollback remain unchanged.
+Flash is still used for trial confirmation and genuine update metadata.
+This change removes the failing entry write; it does not explain or mask CFGBSY.
+
+Deployment artifacts in the bootloader repository:
+
+- `Debug/CANOPEN_Bootloader_STM32G0.bin`: 1.0.8, program at `0x08000000`.
+- `out/vega-0.1.3-reset-swd/slot-a.bin`: signed Debug image plus its manifest,
+  program at `0x08009000`; 106,648 bytes.
+- `out/vega-0.1.3-reset-debug.update.bin`: 51,440-byte signed CAN container,
+  version `0x103`, for subsequent LiftAppTool updates.
+
+For the currently blocked old application, install **both** SWD files on an idle,
+confirmed device, preserving Slot B/scratch/factory/journal. Do not mass erase,
+program `initial.hex` or rewrite the generated factory identity. Disconnect debug
+and power-cycle; check 0.1.3 and wait ten seconds. Run two consecutive CAN
+updates with the new container. No manual reset should be required between them.
+Also test addressed NMT with no SDO: return to the application after five seconds.
+Both Debug/Release builds and native fault-injection tests pass; target reset/
+backup-register and repeated-update behaviour still require bench verification.
+
+Diagnostics remain available. Stage 5 now means marker save, not Ps_Save;
+handoff result **9** means marker write/readback failure (values 0..8 unchanged).
+For example `[05 09 00 B1 00]` identifies this new error. PsResult only describes
+journal reading in this entry path. Flash snapshots may describe an earlier
+independent Flash operation and must not be mistaken for a new marker failure.
+
+### Historical application 0.1.2 diagnostic build
 
 The second update also failed with the signed Debug image installed through
 CAN, both with and without a reset. This rules out a Release-only failure;
@@ -54,9 +109,9 @@ Implemented here:
 
 - Removal of the application image receiver, image CRC/size/manifest writes and
   the old `firmware_update` / `bootloader_interface` modules.
-- A portable application handoff state machine: service authorization -> durable
-  request -> final SDO response -> exact TX confirmation -> platform system reset.
-- Explicit recovery when transmission, NVM or a reset callback fails.
+- A portable application handoff state machine: service authorization -> verified
+  non-Flash marker -> final SDO response -> exact TX confirmation -> system reset.
+- Explicit recovery when transmission, marker IO or a reset callback fails.
 - NVM schema 2 with backward-compatible schema 1 reads.
 - An application-mode / protocol-version / capability discovery interface.
 - Tests with injected storage, transport confirmation and reset callbacks.
@@ -69,7 +124,7 @@ state within 5 seconds resets without confirmation.
 
 **The STM32 handoff backend is now connected.** It checks the installed
 bootloader vector and discovery record at `0x08008FE0`, cooperatively quiesces
-the other three translation tasks, persists the request, checks successful
+the other three translation tasks, verifies the backup-register marker, checks successful
 transmission of the exact FDCAN TX buffer carrying the final reply, and resets.
 Normal startup boots a valid signed application. An explicit SDO update
 request enters service mode; application 0.1.1 also implements the bounded,
@@ -87,33 +142,28 @@ All `0x2000..` objects below are vendor specific. The first LiftAppTool transfer
 on hardware with bootloader 1.0.5. Repeated entry through the new NMT discovery
 policy is native-tested/ARM-built but still requires hardware verification.
 
-### Application 0.1.1: addressed NMT Reset Node discovery
+### Addressed NMT Reset Node discovery (current 0.1.3)
 
 Only `0x000`, DLC 2, `81 01` (local Node 1) requests a five-second bootloader
 window. Broadcast resets, other nodes and Reset Communication retain their
 previous behavior. The local dispatcher requires no pending TX/SDO transfer,
 valid factory identity, IDLE/CONFIRMED journal, successful existing service
-quiescence and an installed bootloader advertising capability bit 1.
-Trial images cannot request this transition. The existing journal records
-`boot_request=2`, Node 126, 250 kbit/s, protocol 2; no SDO reply is fabricated.
-Reset happens only after successful persistence. Save/reset failures use the
-same reconciliation and service-interlock retention as vendor handoff.
+quiescence and an installed bootloader advertising capability bits 0/1/2.
+Trial images cannot request this transition. The non-Flash marker records
+mode 2; Node 126, 250 kbit/s and protocol 2 remain fixed by the target contract.
+No SDO reply is fabricated. Reset happens only after marker readback.
+Save/reset failures use the same marker cleanup and interlock retention as
+vendor handoff.
 
-Bootloader 1.0.6 consumes this request once, waits 5000 ms for a successful
+Bootloader 1.0.8 consumes this request once, waits 5000 ms for a successful
 local SDO exchange, then returns to a valid idle application if none arrives.
 A successful exchange retains service mode for the update. An ordinary power-on
 has no delay. This is an explicit vendor policy, not general CiA NMT semantics.
 There is no physical safety authorization: use a controlled bench.
 
-The final word of the boot contract is now flags: signing bit 0, bounded NMT
-discovery bit 1. This application accepts the old value 1 for vendor SDO entry,
-but NMT discovery requires bit 1 (current flags 3). The old 0.1.0 application
-compares all eight words exactly and cannot hand off to the new contract.
-**Upgrade the application first through old bootloader 1.0.5 using manual
-`0x2000:00=1` entry; then selectively program bootloader 1.0.6 by SWD.**
-Preserve factory and journal. See the bootloader README for exact frames and
-the generated signed `out/vega-0.1.1.update.bin` container. Both components are
-needed for automatic repeated LiftAppTool entry.
+The final word of the boot contract is flags: signing bit 0, bounded NMT
+discovery bit 1, non-Flash reset marker bit 2 (current value 7).
+Both components are needed; use the current paired SWD procedure above.
 
 ## Work plan
 
@@ -254,20 +304,20 @@ sequenceDiagram
     participant T as LiftAppTool
     participant A as Application SDO server
     participant S as Cooperative service coordination
-    participant N as NVM journal
+    participant N as Backup registers
     participant C as CAN TX completion
     participant B as Separate bootloader
     T->>A: Read 2009=2, 200A=0, 200B capability
     T->>A: Write 2000:0 = 1
     A->>S: Verify installed bootloader and authorize/quiesce service
     S-->>A: Granted, or reject with no reset
-    A->>N: Commit UPDATE request, node ID, bitrate, protocol
-    N-->>A: Verified durable commit, or SDO abort
+    A->>N: Commit one-shot mode and complement
+    N-->>A: Verified register readback, or SDO abort
     A->>C: Queue final successful SDO reply
     Note over A,C: Queue acceptance is NOT transmission confirmation
     C-->>A: Exact reply transmitted, or failure/timeout
     A->>A: Platform system reset only after confirmed transmission
-    A->>B: Reset path (not enabled by the current board adapter)
+    A->>B: System reset; consume and clear marker
     Note over B: Separate target: CANopen recovery/update profile
     B-->>T: Boot-Up, then mode=1 / identity
     T->>B: New SDO session for firmware download
@@ -276,7 +326,7 @@ sequenceDiagram
 `bootloader_handoff.c` requires a valid committed NVM record before entry.
 Blank/corrupt/unreadable NVM is not silently converted into a boot decision.
 Duplicate requests while transitioning are rejected; other OD writes are blocked
-until the transition completes or a failed request is durably cleared.
+until the transition completes or a failed marker is cleared and read back.
 The owner stops dequeuing frames during WAIT_ACK. It does not reset inside
 `Od_Write` or inside a CAN callback.
 
@@ -287,23 +337,23 @@ download ACK does not start a handoff. The caller must poll regularly and its
 platform callbacks must be bounded; time uses unsigned millisecond subtraction.
 
 On timeout/TX failure, any queued response must be retired through `cancelAck`,
-then the committed request is cleared before leaving service. If a response has
+then the backup-register marker is cleared before leaving service. If a response has
 not even been queued, it is replaced by an SDO abort rather than sent later as
-a stale success. If NVM clearance or TX retirement cannot be proved, the state
+a stale success. If marker clearance or TX retirement cannot be proved, the state
 stays FAILED/RECOVERY_REQUIRED and the tasks are NOT resumed.
 The tool can read diagnostics and write `2000=0` to retry cleanup.
 
-An NVM operation can fail after its commit reached Flash. Cleanup therefore
-reloads the journal instead of trusting the last RAM snapshot. A reset callback
-which returns is also treated as a fault, not as successful entry.
+Marker write/readback can fail after registers changed. Cleanup therefore
+invalidates both words and verifies clearance before releasing the interlock.
+A reset callback which returns is treated as a fault, not successful entry.
 
-**Power-loss window:** once UPDATE is committed, a power failure may enter the
-separate bootloader even if the tool never received the SDO reply. This must be
-safe: UPDATE means "enter maintenance receiver", NEVER "erase/install an image".
-The tool must rediscover mode after any ambiguous timeout. CAN ACK proves bus
-transmission, not that LiftAppTool's process consumed the reply.
+**Power-loss window:** power/brownout/watchdog reset invalidates the request even
+if backup registers retained it. A subsequent service attempt must be explicit.
+An accepted software-reset marker means "enter maintenance receiver", NEVER
+"erase/install an image". The tool must rediscover mode after ambiguous timeouts.
+CAN ACK proves bus transmission, not that LiftAppTool consumed the reply.
 
-If the application starts and still sees UPDATE, it reports RECOVERY_REQUIRED
+If the application starts and still sees a legacy journal UPDATE, it reports RECOVERY_REQUIRED
 and does NOT auto-reset; this prevents a boot loop when the bootloader has not
 consumed the request.
 
@@ -314,12 +364,14 @@ consumed the request.
 | Callback / field | Requirement before enabling |
 |---|---|
 | `installed` | Verify actual installed/protected bootloader, agreed entry/layout and protocol, not just a compile-time bool |
-| `bitrate` | Exact CANopen bus bitrate inherited by bootloader; bootloader Node-ID 126 is stored |
+| `bitrate` | Exact CANopen bus bitrate; this board fixes 250 kbit/s and boot Node-ID 126 |
 | `enterService` | Explicit request authorizes downtime; cooperatively quiesce other tasks |
 | `leaveService` | Resume only after failed request is safely cleared |
 | `ackStatus` | Confirm THIS final SDO reply; bus-off/abort must not count as success |
 | `cancelAck` | Idempotently retire/abort this reply on failure; report inability to prove retirement |
 | `reset` | Execute system reset; never return, never jump directly to a guessed address |
+| `prepareReset` | Save mode/token and complement outside Flash, commit last, verify readback |
+| `clearReset` | Invalidate marker and verify readback before resuming service |
 
 The FDCAN adapter records `HAL_FDCAN_GetLatestTxFifoQRequestBuffer` immediately
 after queuing the final response. Other producers are already quiescent.
@@ -485,8 +537,8 @@ start role and uses a cooperative loop. It implements the CANopen recovery,
 manifest, update, and restartable transaction paths. Hardware and
 interoperability qualification remain required:
 
-1. Verify the request journal; validate node/bitrate/protocol against supported
-   bus settings. Latch/consume UPDATE safely, then expose mode 1.
+1. Consume/clear the software-reset marker; validate journal/factory and legacy
+   protocol-2 requests. Expose mode 1 only under the defined recovery/entry policy.
 2. If no UPDATE and the main image is valid, boot it. If invalid, stay in a
    documented recovery receiver; do not jump to invalid vectors.
 3. Boot-Up, heartbeat, appropriate NMT state handling and SDO server. No LOP PDO,
@@ -503,7 +555,8 @@ interoperability qualification remain required:
 
 ```mermaid
 flowchart TD
-    R[Separate bootloader reset] --> J[Load/validate journal and image]
+    R[Separate bootloader reset] --> M[Consume/clear reset marker]
+    M --> J[Load/validate journal and image]
     J --> U{UPDATE request or invalid application?}
     U -->|No| A[Validated main application]
     U -->|Yes| L[Latch/consume maintenance request]
@@ -579,10 +632,11 @@ Automated coverage:
   rejected; unprovisioned handoff refused even with an available mock backend.
 - Schema 1 -> 2 identity retention and no false request from reserved bytes.
 - 256 interrupted request-write positions, CRC/commit fallback and invalid input.
-- Unavailable backend, denied service, NVM errors including error AFTER commit.
-- No reset before durable request AND final response queueing AND exact TX proof.
+- Unavailable backend, denied service, journal reads and marker write/readback faults.
+- No reset before verified marker AND final response queueing AND exact TX proof.
 - Returning reset callback treated as failure.
-- TX failure/deadline across timer wrap; durable clear before service release.
+- TX failure/deadline across timer wrap; marker readback-clear before service release.
+- Both Flash writers disabled: no erase/program call during vendor/NMT entry or cleanup.
 - Failed TX retirement / failed clear retains task quiescence; explicit recovery.
 - Unconsumed request on application startup does not cause reset loops.
 - Expedited and segmented entry commands; no side effect on initiate-only ACK.

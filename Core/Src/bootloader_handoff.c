@@ -1,17 +1,18 @@
 /** @file bootloader_handoff.c
- * @brief Persist request -> confirm exact SDO transmission -> system reset.
- * Failures reconcile the journal before resuming application operation.
+ * @brief Non-Flash reset marker -> exact SDO TX confirmation -> system reset.
+ * Failed transitions retire their marker before resuming application operation.
  */
 #include "bootloader_handoff.h"
-#include "device_memory.h"
 #include <string.h>
 
 bool BootHandoff_Available(const BootHandoff *h)
 {
-    return (h->store != NULL) && (h->platform.bitrate != 0U) &&
+    /* The reset marker carries mode only; the target contract fixes the bus rate. */
+    return (h->store != NULL) && (h->platform.bitrate == UINT32_C(250000)) &&
         (h->platform.installed != NULL) && (h->platform.enterService != NULL) &&
         (h->platform.leaveService != NULL) && (h->platform.ackStatus != NULL) &&
         (h->platform.cancelAck != NULL) && (h->platform.reset != NULL) &&
+        (h->platform.prepareReset != NULL) && (h->platform.clearReset != NULL) &&
         h->platform.installed(h->platform.user);
 }
 
@@ -37,16 +38,9 @@ bool BootHandoff_Busy(const BootHandoff *h)
 
 static bool clearRequest(BootHandoff *h)
 {
-    PsData latest;
-    /* Reload: an IO failure after commit does not prove that the write failed. */
-    if ((h->store == NULL) || (Ps_Load(h->store, &latest) != PS_OK)) { return false; }
-    if (latest.boot_request != BOOT_REQUEST_NONE) {
-        latest.boot_request = BOOT_REQUEST_NONE;
-        latest.boot_node_id = 0U; latest.boot_bitrate = 0U; latest.boot_protocol = 0U;
-        if (Ps_Save(h->store, &latest) != PS_OK) { return false; }
-    }
-    *h->identity = latest;
-    return true;
+    return (h->identity->boot_request == BOOT_REQUEST_NONE) &&
+        (h->platform.clearReset != NULL) &&
+        h->platform.clearReset(h->platform.user);
 }
 
 static void fail(BootHandoff *h, BootHandoffResult result)
@@ -99,14 +93,9 @@ static uint32_t request(BootHandoff *h, uint32_t now, uint32_t mode)
         return CO_ABORT_STATE;
     }
     h->service = true;
-    candidate.boot_request = mode;
-    candidate.boot_node_id = DEVICE_BOOT_NODE_ID;
-    candidate.boot_bitrate = h->platform.bitrate;
-    candidate.boot_protocol = BOOT_HANDOFF_PROTOCOL;
     h->stage = BOOT_STAGE_SAVE;
-    h->storage_result = Ps_Save(h->store, &candidate);
-    if (h->storage_result != PS_OK) {
-        fail(h, BOOT_RESULT_STORAGE); return CO_ABORT_HARDWARE;
+    if (!h->platform.prepareReset(h->platform.user, mode)) {
+        fail(h, BOOT_RESULT_MARKER); return CO_ABORT_HARDWARE;
     }
     *h->identity = candidate;
     h->state = BOOT_WAIT_ACK; h->result = BOOT_RESULT_NONE;

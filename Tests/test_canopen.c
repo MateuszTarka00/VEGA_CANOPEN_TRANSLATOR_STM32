@@ -13,6 +13,7 @@ static const FiData factory = {1U, 42U, 7U, 1234U, 2U, 1U, 3U};
 typedef struct {
     uint8_t pages[2][2048];
     int budget;
+    uint32_t erases, writes;
     bool read_error, erase_error, fail_commit_read;
 } Memory;
 static bool memRead(void *u, uint8_t p, uint32_t o, uint8_t *d, uint32_t n)
@@ -28,6 +29,7 @@ static bool memRead(void *u, uint8_t p, uint32_t o, uint8_t *d, uint32_t n)
 static bool memErase(void *u, uint8_t p)
 {
     Memory *m = u;
+    ++m->erases;
     if (m->erase_error) { return false; }
     memset(m->pages[p], 255, 2048); return true;
 }
@@ -35,6 +37,7 @@ static bool memWrite(void *u, uint8_t p, uint32_t o, const uint8_t *d, uint32_t 
 {
     Memory *m = u;
     uint32_t i;
+    ++m->writes;
     assert((o % 8U) == 0U && (n % 8U) == 0U);
     for (i = 0U; i < n; ++i) {
         if (m->budget == 0) { return false; }
@@ -207,7 +210,8 @@ static void testStorage(void)
 typedef struct {
     PsStore *store;
     bool installed, deny_service, service, cancel_error, reset_saw_request;
-    bool fail_commit_on_entry;
+    bool marker_error, clear_error;
+    uint32_t marker;
     Memory *memory;
     BootTxStatus tx;
     uint32_t reset_count, cancel_count;
@@ -218,7 +222,6 @@ static bool enterService(void *u)
     Board *b = u;
     if (b->deny_service) { return false; }
     b->service = true;
-    if (b->fail_commit_on_entry) { b->memory->fail_commit_read = true; }
     return true;
 }
 static void leaveService(void *u)
@@ -227,6 +230,7 @@ static void leaveService(void *u)
     PsData latest;
     assert(Ps_Load(b->store, &latest) == PS_OK);
     assert(latest.boot_request == BOOT_REQUEST_NONE);
+    assert(b->marker == 0U);
     b->service = false;
 }
 static BootTxStatus txStatus(void *u) { return ((Board *)u)->tx; }
@@ -235,16 +239,27 @@ static bool cancelAck(void *u)
     Board *b = u; b->cancel_count++;
     return !b->cancel_error;
 }
+static bool prepareReset(void *u, uint32_t mode)
+{
+    Board *b = u;
+    assert(b->service);
+    b->marker = mode;
+    return !b->marker_error;
+}
+static bool clearReset(void *u)
+{
+    Board *b = u;
+    if (b->clear_error) { return false; }
+    b->marker = 0U;
+    return true;
+}
 static void resetBoard(void *u)
 {
     Board *b = u;
-    PsData d;
-    assert(Ps_Load(b->store, &d) == PS_OK);
     assert(b->service && ((b->tx == BOOT_TX_CONFIRMED) ||
-                         (d.boot_request == BOOT_REQUEST_DISCOVERY)));
-    b->reset_saw_request = (d.boot_request == BOOT_REQUEST_UPDATE ||
-                           d.boot_request == BOOT_REQUEST_DISCOVERY) &&
-        d.boot_node_id == 126U && d.boot_bitrate == 250000U && d.boot_protocol == 2U;
+                         (b->marker == BOOT_REQUEST_DISCOVERY)));
+    b->reset_saw_request = (b->marker == BOOT_REQUEST_UPDATE ||
+                           b->marker == BOOT_REQUEST_DISCOVERY);
     b->reset_count++;
     /* Returning is intentionally a fault; real platform reset must not return. */
 }
@@ -256,6 +271,7 @@ static BootHandoffPlatform boardInit(Board *b, PsStore *s, Memory *m)
     p.enterService = enterService; p.leaveService = leaveService;
     p.ackStatus = txStatus; p.cancelAck = cancelAck; p.reset = resetBoard;
     p.discoveryInstalled = installed;
+    p.prepareReset = prepareReset; p.clearReset = clearReset;
     return p;
 }
 static void setupHandoff(BootHandoff *h, Board *b, PsStore *s, Memory *m, PsData *d)
@@ -279,6 +295,8 @@ static void testHandoff(void)
     setupHandoff(&h, &b, &s, &m, &d);
     h.platform.cancelAck = NULL;
     assert(!BootHandoff_Available(&h) && BootHandoff_Request(&h, 0U) == CO_ABORT_STATE);
+    setupHandoff(&h, &b, &s, &m, &d); h.platform.bitrate = 125000U;
+    assert(!BootHandoff_Available(&h) && BootHandoff_Request(&h, 0U) == CO_ABORT_STATE);
     setupHandoff(&h, &b, &s, &m, &d);
     memset(m.pages, 255, sizeof(m.pages));
     assert(BootHandoff_Request(&h, 0U) == CO_ABORT_HARDWARE);
@@ -288,13 +306,12 @@ static void testHandoff(void)
     setupHandoff(&h, &b, &s, &m, &d); b.deny_service = true;
     assert(BootHandoff_Request(&h, 0U) == CO_ABORT_STATE);
     assert(h.result == BOOT_RESULT_SERVICE_DENIED && d.boot_request == 0U);
-    setupHandoff(&h, &b, &s, &m, &d); m.erase_error = true;
+    setupHandoff(&h, &b, &s, &m, &d); b.marker_error = true;
     assert(BootHandoff_Request(&h, 0U) == CO_ABORT_HARDWARE);
-    assert(h.result == BOOT_RESULT_STORAGE && !b.service && d.boot_request == 0U);
-    setupHandoff(&h, &b, &s, &m, &d); b.fail_commit_on_entry = true;
-    assert(BootHandoff_Request(&h, 0U) == CO_ABORT_HARDWARE);
-    assert(h.result == BOOT_RESULT_STORAGE && !b.service);
-    assert(Ps_Load(&s, &loaded) == PS_OK && loaded.boot_request == 0U);
+    assert(h.result == BOOT_RESULT_MARKER && !b.service && b.marker == 0U);
+    setupHandoff(&h, &b, &s, &m, &d);
+    h.platform.prepareReset = NULL;
+    assert(!BootHandoff_Available(&h) && BootHandoff_Request(&h, 0U) == CO_ABORT_STATE);
     setupHandoff(&h, &b, &s, &m, &d);
     assert(BootHandoff_Request(&h, 0U) == 0U && b.service);
     assert(BootHandoff_Request(&h, 1U) == CO_ABORT_STATE);
@@ -315,23 +332,40 @@ static void testHandoff(void)
     assert(h.result == BOOT_RESULT_TX_FAILED && b.cancel_count == 1U && !b.service);
     setupHandoff(&h, &b, &s, &m, &d);
     assert(BootHandoff_Request(&h, 0U) == 0U); BootHandoff_AckQueued(&h);
-    m.erase_error = true; BootHandoff_Poll(&h, 2000U);
+    b.clear_error = true; BootHandoff_Poll(&h, 2000U);
     assert(h.result == BOOT_RESULT_RECOVERY_REQUIRED && b.service && BootHandoff_Busy(&h));
     assert(BootHandoff_Recover(&h) == CO_ABORT_HARDWARE && b.service);
-    m.erase_error = false;
+    b.clear_error = false;
     assert(BootHandoff_Recover(&h) == 0U && !b.service && h.state == BOOT_IDLE);
     setupHandoff(&h, &b, &s, &m, &d);
     assert(BootHandoff_Request(&h, 0U) == 0U); BootHandoff_AckQueued(&h);
     b.cancel_error = true; BootHandoff_Poll(&h, 2000U);
     assert(h.result == BOOT_RESULT_RECOVERY_REQUIRED && b.service);
     b.cancel_error = false; assert(BootHandoff_Recover(&h) == 0U && !b.service);
-    /* If application sees an unconsumed request after reset, it must NOT reset-loop. */
-    setupHandoff(&h, &b, &s, &m, &d); assert(BootHandoff_Request(&h, 0U) == 0U);
+    /* Stale legacy journal requests require the bootloader, never Flash repair in app. */
+    setupHandoff(&h, &b, &s, &m, &d); d.boot_request = BOOT_REQUEST_UPDATE;
+    d.boot_node_id = 126U; d.boot_bitrate = 250000U; d.boot_protocol = 2U;
+    assert(Ps_Save(&s, &d) == PS_OK);
     p = boardInit(&b, &s, &m); BootHandoff_Init(&h, &p, &s, &d, 1U);
     assert(h.state == BOOT_FAILED && h.result == BOOT_RESULT_RECOVERY_REQUIRED);
     BootHandoff_Poll(&h, 5000U); assert(b.reset_count == 0U);
-    assert(BootHandoff_Recover(&h) == 0U && d.boot_request == 0U);
-    puts("handoff: gating, service interlock, durable request, exact ACK/reset ordering, recovery OK");
+    assert(BootHandoff_Recover(&h) == CO_ABORT_HARDWARE);
+    /* A busy/faulted Flash writer must not block request, reset or cleanup. */
+    setupHandoff(&h, &b, &s, &m, &d);
+    {
+        uint32_t erases = m.erases, writes = m.writes;
+        uint8_t before[sizeof(m.pages)];
+        memcpy(before, m.pages, sizeof(before));
+        m.erase_error = true; m.budget = 0;
+        assert(BootHandoff_Request(&h, 0U) == 0U);
+        BootHandoff_AckQueued(&h); b.tx = BOOT_TX_CONFIRMED;
+        BootHandoff_Poll(&h, 1U);
+        assert(b.reset_count == 1U && b.reset_saw_request && b.marker == 0U);
+        assert(m.erases == erases && m.writes == writes);
+        assert(memcmp(before, m.pages, sizeof(before)) == 0);
+        assert(!b.service);
+    }
+    puts("handoff: non-Flash marker, exact ACK/reset, safe cancellation, zero Flash writes OK");
 }
 
 static CoFrame request(uint8_t cmd, uint16_t index, uint8_t sub)
@@ -362,7 +396,7 @@ static void testNmtDiscovery(void)
     Sender sender;
     CoFrame q = {0};
     uint32_t scenario;
-    for (scenario = 0U; scenario < 15U; ++scenario) {
+    for (scenario = 0U; scenario < 16U; ++scenario) {
         commissioned(&m, &s, &d);
         p = boardInit(&b, &s, &m);
         memset(&sender, 0, sizeof(sender));
@@ -386,22 +420,23 @@ static void testNmtDiscovery(void)
                   assert(Ps_Save(&s, &d) == PS_OK); break;
         case 14U: d.update_state = UINT32_C(0x501);
                   assert(Ps_Save(&s, &d) == PS_OK); break;
+        case 15U: b.marker_error = true; break;
         default: break;
         }
         (void)Co_Receive(&c, &q, 3300U);
-        if (scenario == 0U || scenario == 14U) {
+        if (scenario == 0U || scenario == 12U || scenario == 14U) {
             assert(b.reset_count == 1U && b.reset_saw_request);
             assert(c.od.handoff.result == BOOT_RESULT_RESET_RETURNED);
             assert(!c.od.handoff.ack_queued && b.cancel_count == 0U);
             assert(c.tx_pending && c.pending.id == 0x81U); /* EMCY on returned reset. */
         } else { assert(b.reset_count == 0U); }
-        if (scenario == 0U || scenario == 14U) {
+        if (scenario == 0U || scenario == 12U || scenario == 14U) {
             assert(c.od.handoff.stage == BOOT_STAGE_RESET);
             assert(Co_Get32(&c.pending.data[3]) == UINT32_C(0xB1000707));
-        } else if (scenario == 12U) {
+        } else if (scenario == 15U) {
             assert(c.od.handoff.stage == BOOT_STAGE_SAVE);
-            assert(c.od.handoff.storage_result == PS_IO_ERROR);
-            assert(Co_Get32(&c.pending.data[3]) == UINT32_C(0xB1030405));
+            assert(c.od.handoff.storage_result == PS_OK);
+            assert(Co_Get32(&c.pending.data[3]) == UINT32_C(0xB1000905));
         } else if (scenario == 11U) {
             assert(c.od.handoff.stage == BOOT_STAGE_SERVICE);
             assert(Co_Get32(&c.pending.data[3]) == UINT32_C(0xB1000304));
@@ -413,16 +448,27 @@ static void testNmtDiscovery(void)
         assert(Ps_Load(&s, &loaded) == PS_OK && loaded.boot_request == 0U);
         assert(!b.service);
     }
-    /* Committed-but-unconfirmed write must reconcile before leaving service. */
+    /* Unconfirmed marker write must clear before leaving service. */
     commissioned(&m, &s, &d); p = boardInit(&b, &s, &m);
-    b.fail_commit_on_entry = true;
+    b.marker_error = true;
     BootHandoff_Init(&c.od.handoff, &p, &s, &d, 1U);
     assert(BootHandoff_RequestDiscovery(&c.od.handoff, 0U) == CO_ABORT_HARDWARE);
     assert(c.od.handoff.stage == BOOT_STAGE_SAVE &&
-           c.od.handoff.storage_result == PS_IO_ERROR);
+           c.od.handoff.result == BOOT_RESULT_MARKER);
     assert(!b.service && b.reset_count == 0U);
     assert(Ps_Load(&s, &loaded) == PS_OK && loaded.boot_request == 0U);
-    puts("NMT discovery: addressed-only, no ACK, durable service, capability/trial/IO gates OK");
+    assert(b.marker == 0U);
+    /* CFGBSY-equivalent backend: both erase and program unavailable, zero IO attempts. */
+    commissioned(&m, &s, &d); p = boardInit(&b, &s, &m);
+    BootHandoff_Init(&c.od.handoff, &p, &s, &d, 1U);
+    {
+        uint32_t erases = m.erases, writes = m.writes;
+        m.erase_error = true; m.budget = 0;
+        assert(BootHandoff_RequestDiscovery(&c.od.handoff, 0U) == CO_ABORT_HARDWARE);
+        assert(b.reset_count == 1U && b.reset_saw_request && b.marker == 0U);
+        assert(m.erases == erases && m.writes == writes);
+    }
+    puts("NMT discovery: addressed-only, no ACK, zero Flash writes, capability/trial/marker gates OK");
 }
 static void testSdoAndCore(void)
 {
@@ -581,7 +627,7 @@ static void testEndToEnd(void)
     assert(Co_Receive(&c, &q, 1U)); Co_Poll(&c, 1U);
     assert(abortCode(&sender.last) == CO_ABORT_HARDWARE && !b.service && b.reset_count == 0U);
     assert(Ps_Load(&store, &d) == PS_OK && d.boot_request == BOOT_REQUEST_NONE);
-    puts("integration: request -> durable journal -> exact expedited/segmented ACK -> reset OK");
+    puts("integration: request -> reset marker -> exact expedited/segmented ACK -> reset OK");
 }
 int main(void)
 {
