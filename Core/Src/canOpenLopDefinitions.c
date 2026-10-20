@@ -18,6 +18,18 @@
 #include "string.h" /* For memcpy, memset */
 #include "protocolUtils.h"
 
+#define GENEMEK_MAX_FLOORS       24
+#define GENEMEK_FLOOR_TEXT_LEN    8
+
+typedef struct
+{
+    char floorTexts[GENEMEK_MAX_FLOORS][GENEMEK_FLOOR_TEXT_LEN];
+    uint8_t floorCount;
+
+} GenemekFloorConfig_t;
+
+static GenemekFloorConfig_t genemekFloorConfig = {0};
+
 /**
  * @brief Decompose and process received CANopen message into node state updates
  * 
