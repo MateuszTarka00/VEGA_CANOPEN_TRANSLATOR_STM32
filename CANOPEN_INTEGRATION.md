@@ -2,6 +2,58 @@
 
 ## Decision and current release boundary
 
+### VEGA special-information translation
+
+VEGA display/status payloads start with `0xFF` in byte 0 and require at least
+six bytes (byte offsets below are zero-based). Ordinary floor frames require
+byte 3 = `0x20` and byte 4 in `0x30..0x44`; the displayed floor is
+`byte4 - 0x30 + 1`. Byte 5 selects the arrow: `0x0D` up, `0x0E` down,
+otherwise no arrow. Validation and decoding use the same floor-frame checks.
+
+Special-information frames accept any of the byte-5 selectors `0x44`, `0x84`
+or `0x0E` and map the byte-4 status as follows:
+
+| VEGA status | Meaning | CANopen special indication |
+|---|---|---|
+| `0x53` | Out of service | `NO_SERVICE` (`0x0A`) |
+| `0x4E` | Inspection | `MAINTENANCE` (`0x03`) |
+| `0x4C` | Overload | `OVERLOAD` (`0x16`) |
+| `0x41` | Fire alarm | `FIRE_ALARM` (`0x10`) |
+
+Floor-frame recognition takes precedence: `0x0E` also means a down arrow,
+and `0x41` lies inside the floor-code range. The full frame context, not either
+byte alone, distinguishes an ordinary floor from a special indication.
+Unknown status/selector combinations are rejected unless they form a valid
+ordinary floor frame. Display and special-information updates apply to all
+currently known CANopen nodes.
+
+Each accepted special-information frame refreshes a shared HAL millisecond
+timestamp, even if its indication has not changed. Ordinary floor frames
+continue updating floor/arrow without clearing the indication until **more
+than 1100 ms** have elapsed since the last special frame. The first ordinary
+floor frame after that interval requests `NONE`. This is not a periodic
+timeout: silence on the VEGA bus alone does not clear an indication. Elapsed
+time uses unsigned subtraction so HAL tick rollover is supported.
+
+For each destination node, `specialInformation` is the requested indication;
+`specialInformationPrev` records the indication last accepted by the CANopen
+TX queue, not a confirmed panel state. On a change, LOP sends function `0x43`
+on CAN ID `0x400`, first disabling the previous nonzero indication with byte 5
+= `0x00`, then enabling the new nonzero indication with byte 5 = `0x01`.
+Clearing to `NONE` only disables the previous indication; it does not transmit
+an indication numbered zero. Repeated unchanged indications produce no PDO.
+TX rejection retains `SPECIAL_INFORMATION` for the next transmit-task pass.
+If disable succeeds but enable fails, only enable is retried.
+
+`Tests/test_lop.c` covers all three selectors and four statuses, malformed
+frames, the timeout boundary and tick rollover, indication changes/clearing,
+duplicate suppression and TX rejection before/between transition frames.
+`Tests/run.ps1 -Compiler <native-gcc>` runs these tests and the portable
+CANopen suite. The translation tests use real VEGA/LOP/protocol utilities with
+stubbed HAL transport/time; unused hardware/RTOS sections are discarded by the
+linker. Target verification still needs captured VEGA frames and panel checks
+for overload, inspection, out-of-service and fire-alarm transitions.
+
 ### Remote floor text table
 
 After node 21 announces itself by heartbeat and its LOP assignment requests

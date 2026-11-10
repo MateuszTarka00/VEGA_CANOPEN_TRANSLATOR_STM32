@@ -503,47 +503,31 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
 
     /* Handle special information change */
     if (node->changeFlags & SPECIAL_INFORMATION) {
-        SpecialIndicationMessageTx msg;
+        SpecialIndicationMessageTx msg = {0};
+        msg.function = LOP_SPECIAL_INDICATION_ID;
+        msg.doorMap = node->doorMap;
+        msg.floorNumber = node->floorNumber;
+        msg.liftMap = node->liftMap;
 
-        if(node->specialInformationPrev != node->specialInformation)
-        {
-			if(node->specialInformationPrev != 0)
-			{
-				/* Compose special indication message */
-				msg.function = LOP_SPECIAL_INDICATION_ID;
-				msg.doorMap = node->doorMap;
-				msg.floorNumber = node->floorNumber;
-				msg.liftMap = node->liftMap;
-				msg.specialIndicator = node->specialInformationPrev;
-				msg.onOff = 0x00;
-
-				/* Transmit message */
-				protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
-			}
-
-			/* Compose special indication message */
-			msg.function = LOP_SPECIAL_INDICATION_ID;
-			msg.doorMap = node->doorMap;
-			msg.floorNumber = node->floorNumber;
-			msg.liftMap = node->liftMap;
-			msg.specialIndicator = node->specialInformation;
-
-			if(node->specialInformation == CANOPEN_SPECIAL_INDICATION_NONE)
-			{
-				msg.onOff = 0x00;
-			}
-			else
-			{
-				msg.onOff = 0x01;
-			}
-
-			/* Transmit message */
-			protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
-
-			/* Clear change flag after transmission */
-			node->changeFlags &= (~SPECIAL_INFORMATION);
-			node->specialInformationPrev = node->specialInformation;
+        if (node->specialInformationPrev != node->specialInformation &&
+            node->specialInformationPrev != CANOPEN_SPECIAL_INDICATION_NONE) {
+            msg.specialIndicator = node->specialInformationPrev;
+            msg.onOff = FALSE;
+            if (!protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN)) {
+                return;
+            }
+            node->specialInformationPrev = CANOPEN_SPECIAL_INDICATION_NONE;
         }
+
+        if (node->specialInformationPrev != node->specialInformation) {
+            msg.specialIndicator = node->specialInformation;
+            msg.onOff = TRUE;
+            if (!protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN)) {
+                return;
+            }
+            node->specialInformationPrev = node->specialInformation;
+        }
+        node->changeFlags &= (~SPECIAL_INFORMATION);
     }
 
     /* Handle displayed floor indicator change */

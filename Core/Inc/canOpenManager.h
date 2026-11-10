@@ -171,8 +171,8 @@ typedef struct
 
     bool upArrivingSound;            /**< UP arriving sound Active */
     bool downArrivingSound;          /**< DOWN arriving sound Active */
-	uint8_t specialInformation;
-    uint8_t specialInformationPrev;
+    uint8_t specialInformation;      /**< Requested CanOpenSpecialIndication_t value */
+    uint8_t specialInformationPrev;  /**< Last indication accepted by the CANopen TX queue */
 
     uint8_t displayedFloor;          /**< Current floor to display */
     uint8_t displayedArrow;          /**< Arrow indicator (0x00/0x10/0x20/0x30) */

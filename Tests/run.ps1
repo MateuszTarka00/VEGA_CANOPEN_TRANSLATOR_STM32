@@ -24,9 +24,12 @@ try {
         "Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM0") |
         ForEach-Object { "-I" + (Join-Path $root $_) }
     & $Compiler "-std=c99" "-Wall" "-Werror" "-Wno-int-to-pointer-cast" `
+        "-ffunction-sections" "-fdata-sections" "-Wl,--gc-sections" `
         "-DSTM32G0B1xx" "-DUSE_HAL_DRIVER" @lopIncludes `
         (Join-Path $PSScriptRoot "test_lop.c") `
-        (Join-Path $root "Core/Src/canOpenLopDefinitions.c") "-o" $lopOutput
+        (Join-Path $root "Core/Src/canOpenLopDefinitions.c") `
+        (Join-Path $root "Core/Src/vegaCanManager.c") `
+        (Join-Path $root "Core/Src/protocolUtils.c") "-o" $lopOutput
     if ($LASTEXITCODE -ne 0) { throw "LOP compilation failed: $LASTEXITCODE" }
     & $lopOutput
     if ($LASTEXITCODE -ne 0) { throw "LOP tests failed: $LASTEXITCODE" }

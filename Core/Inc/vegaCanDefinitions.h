@@ -65,19 +65,19 @@
 /** @brief Base CAN ID for TX messages */
 #define FIRST_FLOOR_NUMBER_ID   0x200
 
-//special informations
-
-#define VEGA_SPECIAL_INFORMATION_ID_0 	0x44
-#define VEGA_SPECIAL_INFORMATION_ID_1 	0x84
-#define VEGA_SPECIAL_INFORMATION_ID_2 	0x0E
-#define VEGA_INSPECTION_ID				0x4E
-#define VEGA_OUT_OF_SERVICE_ID			0x53
-#define VEGA_OVERLOAD_ID				0x4C
-#define	VEGA_FIRE_ALARM					0x41
+/* Special-information selectors (byte 5) and status codes (byte 4). */
+#define VEGA_SPECIAL_INFORMATION_ID_0           0x44U
+#define VEGA_SPECIAL_INFORMATION_ID_1           0x84U
+#define VEGA_SPECIAL_INFORMATION_ID_2           0x0EU
+#define VEGA_INSPECTION_ID                      0x4EU
+#define VEGA_OUT_OF_SERVICE_ID                  0x53U
+#define VEGA_OVERLOAD_ID                        0x4CU
+#define VEGA_FIRE_ALARM_ID                      0x41U
 
 /* VEGA RX payload layout and display-message values */
 #define VEGA_RX_MESSAGE_ID_BYTE                 0
 #define VEGA_RX_BUTTON_STATE_BYTE               2
+#define VEGA_RX_DISPLAY_TYPE_BYTE               3
 #define VEGA_RX_SPECIAL_FLOOR_BYTE              4
 #define VEGA_RX_SPECIAL_VALUE_BYTE              5
 #define VEGA_RX_MIN_MESSAGE_LENGTH              3
@@ -86,6 +86,7 @@
 #define VEGA_RX_SPECIAL_MESSAGE_MARKER          0xFF
 #define VEGA_INVALID_FLOOR_NUMBER               0xFF
 #define VEGA_RX_FLOOR_COUNT                     20
+#define VEGA_DISPLAY_FLOOR_TYPE                 0x20U
 #define VEGA_DISPLAY_FLOOR_ASCII_BASE           0x30
 #define VEGA_DISPLAY_FLOOR_ASCII_LIMIT          0x45
 #define VEGA_DISPLAY_FLOOR_NUMBER_OFFSET        1
