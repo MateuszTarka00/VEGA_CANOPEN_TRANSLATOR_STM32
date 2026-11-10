@@ -227,13 +227,22 @@ bool validateMessage(
             return false;
         }
 
+        if(msg->data[4] == 0x4C)
+        {
+        	uint8_t dupa = 0;
+        }
+
         bool isFloorMessage =
             msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] >= VEGA_DISPLAY_FLOOR_ASCII_BASE &&
             msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] < VEGA_DISPLAY_FLOOR_ASCII_LIMIT;
         bool isSpecialInformationMessage =
-            msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID &&
+            (msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID_0 ||
+             msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID_1 ||
+			 msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID_2) &&
             (msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] == VEGA_OUT_OF_SERVICE_ID ||
-             msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] == VEGA_INSPECTION_ID);
+             msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] == VEGA_INSPECTION_ID ||
+			 msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] == VEGA_OVERLOAD_ID ||
+			 msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE] == VEGA_FIRE_ALARM);
 
         return isFloorMessage || isSpecialInformationMessage;
     }

@@ -505,19 +505,45 @@ void processNodeToSendMsg(CanOpenNodeHandler *node)
     if (node->changeFlags & SPECIAL_INFORMATION) {
         SpecialIndicationMessageTx msg;
 
-        /* Compose special indication message */
-        msg.function = LOP_SPECIAL_INDICATION_ID;
-        msg.doorMap = node->doorMap;
-        msg.floorNumber = node->floorNumber;
-        msg.liftMap = node->liftMap;
-        msg.specialIndicator = node->specialInformation;
-        msg.onOff = 0x81;
+        if(node->specialInformationPrev != node->specialInformation)
+        {
+			if(node->specialInformationPrev != 0)
+			{
+				/* Compose special indication message */
+				msg.function = LOP_SPECIAL_INDICATION_ID;
+				msg.doorMap = node->doorMap;
+				msg.floorNumber = node->floorNumber;
+				msg.liftMap = node->liftMap;
+				msg.specialIndicator = node->specialInformationPrev;
+				msg.onOff = 0x00;
 
-        /* Transmit message */
-        protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+				/* Transmit message */
+				protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+			}
 
-        /* Clear change flag after transmission */
-        node->changeFlags &= (~SPECIAL_INFORMATION);
+			/* Compose special indication message */
+			msg.function = LOP_SPECIAL_INDICATION_ID;
+			msg.doorMap = node->doorMap;
+			msg.floorNumber = node->floorNumber;
+			msg.liftMap = node->liftMap;
+			msg.specialIndicator = node->specialInformation;
+
+			if(node->specialInformation == CANOPEN_SPECIAL_INDICATION_NONE)
+			{
+				msg.onOff = 0x00;
+			}
+			else
+			{
+				msg.onOff = 0x01;
+			}
+
+			/* Transmit message */
+			protocolSend(MASTER_LOP_TX_ID, msg.data, CAN_OPEN_MSG_PDO_LENGTH, PROTOCOL_CANOPEN);
+
+			/* Clear change flag after transmission */
+			node->changeFlags &= (~SPECIAL_INFORMATION);
+			node->specialInformationPrev = node->specialInformation;
+        }
     }
 
     /* Handle displayed floor indicator change */

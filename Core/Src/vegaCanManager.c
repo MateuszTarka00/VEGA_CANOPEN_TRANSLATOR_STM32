@@ -32,13 +32,15 @@ extern SemaphoreHandle_t canOpenNodesListMutex;
 /* ============================================================================ */
 
 /** @brief Connection timeout - consider disconnected after this period */
-#define CONNECTED_TO_MASTER_TIMEOUT 2500
+#define CONNECTED_TO_MASTER_TIMEOUT 	2500
 
 /** @brief TX interval when disconnected from master controller */
-#define TIME_SEND_NOT_CONNECTED     1000
+#define TIME_SEND_NOT_CONNECTED     	1000
 
 /** @brief TX interval when connected to master controller */
-#define TIME_SEND_CONNECTED         100
+#define TIME_SEND_CONNECTED         	100
+
+#define MAXIMUM_SPECIAL_MESSAGE_TIME	1100
 
 /* ============================================================================ */
 /* VEGA MESSAGE FORMAT                                                        */
@@ -87,9 +89,12 @@ void VEGA_InitRTOS(void)
 static void processVegaDisplayMessage(const CAN_Message_t *msg)
 {
 	CanOpenNodeObject *nodePtr = getCanOpenObjectsList();
+	uint8_t specialMessage = CANOPEN_SPECIAL_INDICATION_NONE;
 	uint8_t statusCode = msg->data[VEGA_RX_SPECIAL_FLOOR_BYTE];
+	static uint32_t specialInformation_LastTick = 0;
+	uint32_t tick = HAL_GetTick();
 
-	if (statusCode < VEGA_DISPLAY_FLOOR_ASCII_LIMIT) {
+	if (statusCode < VEGA_DISPLAY_FLOOR_ASCII_LIMIT && msg->data[3] == 0x20) {
 		uint8_t floorToDisplay =
 			statusCode - VEGA_DISPLAY_FLOOR_ASCII_BASE + VEGA_DISPLAY_FLOOR_NUMBER_OFFSET;
 		uint8_t arrowToDisplay = NO_ARROW;
@@ -118,13 +123,23 @@ static void processVegaDisplayMessage(const CAN_Message_t *msg)
 				node->changeFlags |= DISPLAYED_ARROW;
 			}
 
+			if((tick - specialInformation_LastTick) > MAXIMUM_SPECIAL_MESSAGE_TIME)
+			{
+				if (node->specialInformation != specialMessage) {
+					node->specialInformation = specialMessage;
+					node->changeFlags |= SPECIAL_INFORMATION;
+				}
+			}
+
 			nodePtr = nodePtr->nextObject;
 		}
 		return;
 	}
 
-	if (msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID) {
-		uint8_t specialMessage = CANOPEN_SPECIAL_INDICATION_NONE;
+	if (msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID_0 ||
+	    msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID_1 ||
+		msg->data[VEGA_RX_SPECIAL_VALUE_BYTE] == VEGA_SPECIAL_INFORMATION_ID_2) {
+		specialInformation_LastTick = tick;
 
 		switch (statusCode) {
 		case VEGA_OUT_OF_SERVICE_ID:
@@ -132,6 +147,12 @@ static void processVegaDisplayMessage(const CAN_Message_t *msg)
 			break;
 		case VEGA_INSPECTION_ID:
 			specialMessage = CANOPEN_SPECIAL_INDICATION_MAINTENANCE;
+			break;
+		case VEGA_OVERLOAD_ID:
+			specialMessage = CANOPEN_SPECIAL_INDICATION_OVERLOAD;
+			break;
+		case VEGA_FIRE_ALARM:
+			specialMessage = CANOPEN_SPECIAL_INDICATION_FIRE_ALARM;
 			break;
 		default:
 			break;

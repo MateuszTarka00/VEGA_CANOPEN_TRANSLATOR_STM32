@@ -47,6 +47,8 @@
 /** @brief Master TX ID for SDO configuration (SDO) */
 #define MASTER_LOP_TX_SDO 		0x600
 
+#define GENEMEK_MESSAGES_COUNT	 4
+
 /* ============================================================================ */
 /* LOP FUNCTION IDs & PROTOCOL CONSTANTS                                     */
 /* ============================================================================ */

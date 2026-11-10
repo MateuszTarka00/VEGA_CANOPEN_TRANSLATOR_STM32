@@ -115,7 +115,8 @@ static CanOpenNodeObject* createNode(uint32_t id)
 	node->canOpenNodeHandler.lastNmtStartTime = 0U;
 	node->canOpenNodeHandler.upArrivingSound = FALSE;
 	node->canOpenNodeHandler.downArrivingSound = FALSE;
-	node ->canOpenNodeHandler.specialInformation = FALSE;
+	node->canOpenNodeHandler.specialInformation = FALSE;
+	node ->canOpenNodeHandler.specialInformationPrev = FALSE;
 	node->nextObject = NULL;
 
 	return node;

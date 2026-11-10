@@ -67,11 +67,13 @@
 
 //special informations
 
-#define VEGA_SPECIAL_INFORMATION_ID  0x44
-
-#define VEGA_INSPECTION_ID			0x4E
-
-#define VEGA_OUT_OF_SERVICE_ID		0x53
+#define VEGA_SPECIAL_INFORMATION_ID_0 	0x44
+#define VEGA_SPECIAL_INFORMATION_ID_1 	0x84
+#define VEGA_SPECIAL_INFORMATION_ID_2 	0x0E
+#define VEGA_INSPECTION_ID				0x4E
+#define VEGA_OUT_OF_SERVICE_ID			0x53
+#define VEGA_OVERLOAD_ID				0x4C
+#define	VEGA_FIRE_ALARM					0x41
 
 /* VEGA RX payload layout and display-message values */
 #define VEGA_RX_MESSAGE_ID_BYTE                 0
