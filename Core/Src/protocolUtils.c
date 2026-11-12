@@ -17,6 +17,7 @@
 #include "canOpenLopDefinitions.h"
 #include "vegaCanDefinitions.h"
 #include "fdcan.h"
+#include "gpio.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -98,15 +99,31 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     );
 
     if (status != HAL_OK) {
-        if (hfdcan == &hfdcan1) { canOpenRxErrors++; }
+        if (hfdcan == &hfdcan1) {
+            canOpenRxErrors++;
+            CAN_StatusLed_RecordError(CAN_STATUS_BUS_CANOPEN);
+        } else if (hfdcan == &hfdcan2) {
+            CAN_StatusLed_RecordError(CAN_STATUS_BUS_VEGA);
+        }
         return;
     }
     if ((rxHeader.IdType != FDCAN_STANDARD_ID) ||
         (rxHeader.RxFrameType != FDCAN_DATA_FRAME) ||
         (rxHeader.FDFormat != FDCAN_CLASSIC_CAN) ||
         (DLC2LEN(rxHeader.DataLength) > 8U)) {
-        if (hfdcan == &hfdcan1) { canOpenRxErrors++; }
+        if (hfdcan == &hfdcan1) {
+            canOpenRxErrors++;
+            CAN_StatusLed_RecordError(CAN_STATUS_BUS_CANOPEN);
+        } else if (hfdcan == &hfdcan2) {
+            CAN_StatusLed_RecordError(CAN_STATUS_BUS_VEGA);
+        }
         return;
+    }
+
+    if (hfdcan == &hfdcan1) {
+        CAN_StatusLed_RecordRx(CAN_STATUS_BUS_CANOPEN);
+    } else if (hfdcan == &hfdcan2) {
+        CAN_StatusLed_RecordRx(CAN_STATUS_BUS_VEGA);
     }
 
     msg.id = rxHeader.Identifier;
@@ -160,15 +177,31 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
     );
 
     if (status != HAL_OK) {
-        if (hfdcan == &hfdcan1) { canOpenRxErrors++; }
+        if (hfdcan == &hfdcan1) {
+            canOpenRxErrors++;
+            CAN_StatusLed_RecordError(CAN_STATUS_BUS_CANOPEN);
+        } else if (hfdcan == &hfdcan2) {
+            CAN_StatusLed_RecordError(CAN_STATUS_BUS_VEGA);
+        }
         return;
     }
     if ((rxHeader.IdType != FDCAN_STANDARD_ID) ||
         (rxHeader.RxFrameType != FDCAN_DATA_FRAME) ||
         (rxHeader.FDFormat != FDCAN_CLASSIC_CAN) ||
         (DLC2LEN(rxHeader.DataLength) > 8U)) {
-        if (hfdcan == &hfdcan1) { canOpenRxErrors++; }
+        if (hfdcan == &hfdcan1) {
+            canOpenRxErrors++;
+            CAN_StatusLed_RecordError(CAN_STATUS_BUS_CANOPEN);
+        } else if (hfdcan == &hfdcan2) {
+            CAN_StatusLed_RecordError(CAN_STATUS_BUS_VEGA);
+        }
         return;
+    }
+
+    if (hfdcan == &hfdcan1) {
+        CAN_StatusLed_RecordRx(CAN_STATUS_BUS_CANOPEN);
+    } else if (hfdcan == &hfdcan2) {
+        CAN_StatusLed_RecordRx(CAN_STATUS_BUS_VEGA);
     }
 
     msg.id = rxHeader.Identifier;

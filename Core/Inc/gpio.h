@@ -38,6 +38,16 @@ extern "C" {
 void MX_GPIO_Init(void);
 
 /* USER CODE BEGIN Prototypes */
+/* Define the four VEGA_CAN_* pin/port macros in main.h to enable its LED pair. */
+typedef enum
+{
+  CAN_STATUS_BUS_CANOPEN = 0,
+  CAN_STATUS_BUS_VEGA = 1
+} CanStatusBus_t;
+
+void CAN_StatusLed_RecordRx(CanStatusBus_t bus);
+void CAN_StatusLed_RecordError(CanStatusBus_t bus);
+void CAN_StatusLed_Update(void);
 
 /* USER CODE END Prototypes */
 

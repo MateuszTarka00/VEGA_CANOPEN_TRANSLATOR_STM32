@@ -33,6 +33,7 @@
 #include "protocolUtils.h"
 #include "canopen_port.h"
 #include "canopen_nmt.h"
+#include "gpio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -445,6 +446,7 @@ void canOpenRx(void *argument)
   for(;;)
   {
 	CAN_Message_t msg;
+  CAN_StatusLed_Update();
     bool self_test_passed;
 	CanopenPort_Poll();
     self_test_passed = startupSelfTestPassed();
